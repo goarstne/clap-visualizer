@@ -1,0 +1,461 @@
+#include <clap/clap.h>
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <charconv>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <fstream>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+#include <arpa/inet.h>
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+namespace {
+constexpr size_t Limit = 65536, RingSize = 16384, Samples = 1024, QueueLimit = 262144;
+static_assert(std::atomic<double>::is_always_lock_free && std::atomic<uint64_t>::is_always_lock_free &&
+              std::atomic<uint32_t>::is_always_lock_free && std::atomic<bool>::is_always_lock_free);
+
+uint32_t rotate(uint32_t n, int bits) { return (n << bits) | (n >> (32 - bits)); }
+std::string acceptKey(const std::string &key) {
+    std::string data = key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+    uint64_t bits = data.size() * 8;
+    data += char(0x80);
+    while (data.size() % 64 != 56) data += '\0';
+    for (int i = 7; i >= 0; --i) data += char(bits >> (i * 8));
+    uint32_t h[5] = {0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0};
+    for (size_t pos = 0; pos < data.size(); pos += 64) {
+        uint32_t w[80]{};
+        for (int i = 0; i < 16; ++i)
+            for (int j = 0; j < 4; ++j) w[i] = (w[i] << 8) | uint8_t(data[pos + i * 4 + j]);
+        for (int i = 16; i < 80; ++i) w[i] = rotate(w[i-3] ^ w[i-8] ^ w[i-14] ^ w[i-16], 1);
+        uint32_t a=h[0], b=h[1], c=h[2], d=h[3], e=h[4];
+        for (int i = 0; i < 80; ++i) {
+            uint32_t f, k;
+            if (i < 20) { f = (b & c) | (~b & d); k = 0x5a827999; }
+            else if (i < 40) { f = b ^ c ^ d; k = 0x6ed9eba1; }
+            else if (i < 60) { f = (b & c) | (b & d) | (c & d); k = 0x8f1bbcdc; }
+            else { f = b ^ c ^ d; k = 0xca62c1d6; }
+            uint32_t t = rotate(a, 5) + f + e + k + w[i];
+            e=d; d=c; c=rotate(b,30); b=a; a=t;
+        }
+        h[0]+=a; h[1]+=b; h[2]+=c; h[3]+=d; h[4]+=e;
+    }
+    unsigned char digest[20];
+    for (int i=0; i<20; ++i) digest[i] = h[i/4] >> (24 - 8*(i%4));
+    constexpr char alphabet[]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    for (int i=0; i<20; i+=3) {
+        uint32_t n = uint32_t(digest[i]) << 16;
+        if (i+1<20) n |= uint32_t(digest[i+1]) << 8;
+        if (i+2<20) n |= digest[i+2];
+        out += alphabet[n >> 18]; out += alphabet[(n >> 12) & 63];
+        out += i+1<20 ? alphabet[(n >> 6) & 63] : '=';
+        out += i+2<20 ? alphabet[n & 63] : '=';
+    }
+    return out;
+}
+std::string frame(int op, const std::string &payload) {
+    std::string out(1, char(0x80 | op));
+    size_t n=payload.size();
+    if (n<126) out += char(n);
+    else if (n<=65535) { out += char(126); out += char(n >> 8); out += char(n); }
+    else { out += char(127); for (int i=7; i>=0; --i) out += char(uint64_t(n) >> (8*i)); }
+    return out + payload;
+}
+bool utf8(const std::string &s) {
+    for (size_t i=0; i<s.size();) {
+        uint8_t c=s[i++];
+        if (c<0x80) continue;
+        int n; uint32_t cp, min;
+        if (c>=0xc2 && c<=0xdf) { n=1; cp=c&31; min=0x80; }
+        else if (c>=0xe0 && c<=0xef) { n=2; cp=c&15; min=0x800; }
+        else if (c>=0xf0 && c<=0xf4) { n=3; cp=c&7; min=0x10000; }
+        else return false;
+        if (i+n>s.size()) return false;
+        while (n--) { uint8_t b=s[i++]; if ((b&0xc0)!=0x80) return false; cp=(cp<<6)|(b&63); }
+        if (cp<min || cp>0x10ffff || (cp>=0xd800 && cp<=0xdfff)) return false;
+    }
+    return true;
+}
+std::string lower(std::string s) { for (char &c:s) if (c>='A' && c<='Z') c+=32; return s; }
+std::string trim(const std::string &s) {
+    size_t a=s.find_first_not_of(" \t"), b=s.find_last_not_of(" \t");
+    return a==std::string::npos ? "" : s.substr(a,b-a+1);
+}
+bool token(const std::string &s, const char *wanted) {
+    size_t pos=0;
+    do { size_t end=s.find(',',pos); if (lower(trim(s.substr(pos,end-pos)))==wanted) return true;
+         if (end==std::string::npos) break;
+         pos=end+1; } while (true);
+    return false;
+}
+const char *mime(const std::string &path) {
+    std::string ext=lower(path.substr(path.find_last_of('.')+1));
+    if (ext=="html") return "text/html; charset=utf-8";
+    if (ext=="js" || ext=="mjs") return "text/javascript; charset=utf-8";
+    if (ext=="css") return "text/css; charset=utf-8";
+    if (ext=="json") return "application/json";
+    if (ext=="svg") return "image/svg+xml";
+    if (ext=="png") return "image/png";
+    if (ext=="ico") return "image/x-icon";
+    if (ext=="wasm") return "application/wasm";
+    return "application/octet-stream";
+}
+std::string number(double value) {
+    char text[64];
+    auto result=std::to_chars(text,text+sizeof(text),value);
+    return {text,result.ptr};
+}
+using Clock=std::chrono::steady_clock;
+struct Client {
+    int fd=-1, file=-1;
+    bool ws=false, display=false, closing=false, dead=false;
+    std::string input, output;
+    size_t sent=0;
+    Clock::time_point progress=Clock::now();
+};
+struct Plugin {
+    clap_plugin_t api{};
+    const clap_host_t *host;
+    const clap_host_state_t *hostState=nullptr;
+    struct Stereo { float l,r; } ring[RingSize]{};
+    alignas(64) std::atomic<uint64_t> write{0};
+    alignas(64) std::atomic<uint64_t> read{0};
+    std::atomic<double> bpm{0}, beat{0}, sampleRate{48000};
+    std::atomic<uint32_t> signature{(4u<<16)|4}, sequence{0};
+    std::atomic<bool> playing{false}, stop{false}, dirty{false};
+    std::thread worker;
+    std::mutex stateMutex;
+    std::string state, webRoot;
+    uint64_t stateVersion=0;
+    explicit Plugin(const clap_host_t *h):host(h) {}
+    ~Plugin() { stop=true; if (worker.joinable()) worker.join(); }
+    void queue(Client &c, const std::string &bytes, bool audio=false) {
+        if (c.dead || c.closing) return;
+        if (audio && c.output.size()!=c.sent) return;
+        if (c.sent) { c.output.erase(0,c.sent); c.sent=0; }
+        if (c.output.size()+bytes.size()>QueueLimit) { c.dead=true; return; }
+        if (c.output.empty()) c.progress=Clock::now();
+        c.output+=bytes;
+    }
+    void closeWS(Client &c, uint16_t code) {
+        queue(c,frame(8,std::string{char(code>>8),char(code)})); c.closing=true;
+    }
+    void response(Client &c, const char *status, const std::string &body) {
+        queue(c,std::string("HTTP/1.1 ")+status+"\r\nConnection: close\r\nContent-Type: text/plain\r\nContent-Length: "+std::to_string(body.size())+"\r\n\r\n"+body);
+        c.closing=true;
+    }
+    void http(Client &c) {
+        size_t end=c.input.find("\r\n\r\n");
+        if (end==std::string::npos) { if (c.input.size()>Limit) response(c,"431 Request Header Fields Too Large", "header too large"); return; }
+        if (end+4>Limit) { response(c,"431 Request Header Fields Too Large","header too large"); return; }
+        std::string request=c.input.substr(0,end); c.input.erase(0,end+4);
+        size_t lineEnd=request.find("\r\n");
+        std::string line=request.substr(0,lineEnd);
+        size_t a=line.find(' '), b=line.find(' ',a==std::string::npos ? a : a+1);
+        if (a==std::string::npos || b==std::string::npos ||
+            (line.substr(b+1)!="HTTP/1.1" && line.substr(b+1)!="HTTP/1.0")) { response(c,"400 Bad Request","bad request"); return; }
+        if (line.substr(0,a)!="GET") { response(c,"405 Method Not Allowed","GET only"); return; }
+        std::string path=line.substr(a+1,b-a-1), key, upgrade, connection, version, hostHeader;
+        bool keySeen=false, versionSeen=false, hostSeen=false;
+        size_t pos=lineEnd==std::string::npos ? request.size() : lineEnd+2;
+        while (pos<request.size()) {
+            size_t next=request.find("\r\n",pos); if (next==std::string::npos) next=request.size();
+            std::string header=request.substr(pos,next-pos); size_t colon=header.find(':');
+            if (colon==std::string::npos) { response(c,"400 Bad Request","bad header"); return; }
+            std::string name=lower(header.substr(0,colon)), value=trim(header.substr(colon+1));
+            if (name=="sec-websocket-key") { if (keySeen) { response(c,"400 Bad Request","duplicate key"); return; } keySeen=true; key=value; }
+            if (name=="sec-websocket-version") { if (versionSeen) { response(c,"400 Bad Request","duplicate version"); return; } versionSeen=true; version=value; }
+            if (name=="host") { if (hostSeen) { response(c,"400 Bad Request","duplicate host"); return; } hostSeen=true; hostHeader=value; }
+            if (name=="upgrade") upgrade+=","+value;
+            if (name=="connection") connection+=","+value;
+            pos=next+2;
+        }
+        path=path.substr(0,path.find('?'));
+        std::string decoded;
+        auto hex=[](char x)->int { if (x>='0'&&x<='9') return x-'0'; if (x>='a'&&x<='f') return x-'a'+10; if (x>='A'&&x<='F') return x-'A'+10; return -1; };
+        for (size_t i=0;i<path.size();++i) {
+            char ch=path[i];
+            if (ch=='%') { if (i+2>=path.size() || hex(path[i+1])<0 || hex(path[i+2])<0) { response(c,"400 Bad Request","bad escape"); return; }
+                ch=char(hex(path[i+1])*16+hex(path[i+2])); i+=2; }
+            if (uint8_t(ch)<32 || ch=='\\') { response(c,"403 Forbidden","forbidden path"); return; }
+            decoded+=ch;
+        }
+        if (decoded.empty() || decoded[0]!='/' || decoded.find("..")!=std::string::npos) { response(c,"403 Forbidden","forbidden path"); return; }
+        if (decoded=="/ws") {
+            constexpr char alphabet[]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+            bool valid=key.size()==24 && key.substr(22)=="==";
+            for (size_t i=0;i<std::min(size_t(22),key.size());++i) if (!std::strchr(alphabet,key[i]) || !key[i]) valid=false;
+            if (valid && ((std::strchr(alphabet,key[21])-alphabet)&15)) valid=false;
+            if (!valid || hostHeader.empty() || version!="13" || !token(upgrade,"websocket") || !token(connection,"upgrade") || line.substr(b+1)!="HTTP/1.1") { response(c,"400 Bad Request","bad websocket handshake"); return; }
+            queue(c,"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: "+acceptKey(key)+"\r\n\r\n");
+            c.ws=true;
+            std::lock_guard<std::mutex> guard(stateMutex);
+            if (!state.empty()) queue(c,frame(1,state));
+            return;
+        }
+        if (decoded=="/") decoded="/index.html";
+        char resolved[4096];
+        if (webRoot.empty() || !realpath((webRoot+decoded).c_str(),resolved)) { response(c,"404 Not Found","not found"); return; }
+        std::string full=resolved;
+        if (full.compare(0,webRoot.size()+1,webRoot+"/")!=0) { response(c,"403 Forbidden","forbidden path"); return; }
+        c.file=open(full.c_str(),O_RDONLY|O_CLOEXEC|O_NONBLOCK);
+        struct stat st{};
+        if (c.file<0 || fstat(c.file,&st)!=0 || !S_ISREG(st.st_mode)) {
+            if (c.file>=0) close(c.file);
+            c.file=-1; response(c,"404 Not Found","not found"); return;
+        }
+        queue(c,std::string("HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: ")+mime(full)+"\r\nContent-Length: "+std::to_string(st.st_size)+"\r\n\r\n");
+        c.closing=true;
+    }
+    void websocket(Client &c, std::vector<Client> &clients, uint64_t &seenVersion) {
+        while (!c.closing && !c.dead && c.input.size()>=2) {
+            const auto *p=reinterpret_cast<const uint8_t *>(c.input.data());
+            uint8_t op=p[0]&15; uint64_t n=p[1]&127; size_t h=2;
+            if ((p[0]&0x70) || !(p[0]&0x80) || !(p[1]&0x80) ||
+                (op!=1 && op!=2 && op!=8 && op!=9 && op!=10)) { closeWS(c,1002); break; }
+            if (n==126) { if (c.input.size()<4) break; n=(uint64_t(p[2])<<8)|p[3]; h=4; if (n<126) { closeWS(c,1002); break; } }
+            else if (n==127) { if (c.input.size()<10) break; n=0; for (int i=2;i<10;++i) n=(n<<8)|p[i]; h=10; if (n<=65535 || (p[2]&128)) { closeWS(c,1002); break; } }
+            if (n>Limit || (op>=8 && n>125)) { closeWS(c,1009); break; }
+            if (c.input.size()<h+4+n) break;
+            std::string payload=c.input.substr(h+4,n);
+            for (size_t i=0;i<n;++i) payload[i]^=p[h+(i%4)];
+            c.input.erase(0,h+4+n);
+            if (op==8) {
+                if (n==1) { closeWS(c,1002); break; }
+                if (n>=2) {
+                    uint16_t code=(uint16_t(uint8_t(payload[0]))<<8)|uint8_t(payload[1]);
+                    if (!((code>=1000 && code<=1014 && code!=1004 && code!=1005 && code!=1006) || (code>=3000 && code<=4999))) { closeWS(c,1002); break; }
+                    if (!utf8(payload.substr(2))) { closeWS(c,1007); break; }
+                }
+                queue(c,frame(8,payload)); c.closing=true; break;
+            }
+            if (op==9) { queue(c,frame(10,payload)); continue; }
+            if (op==10 || op==2) continue;
+            if (!utf8(payload)) { closeWS(c,1007); break; }
+            if (payload=="hello display") { c.display=true; continue; }
+            if (payload=="hello remote") { c.display=false; continue; }
+            if (payload.compare(0,15,"{\"type\":\"state\"")==0) {
+                { std::lock_guard<std::mutex> guard(stateMutex); state=payload; seenVersion=++stateVersion; }
+                dirty=true; if (host->request_callback) host->request_callback(host);
+            }
+            std::string bytes=frame(1,payload);
+            for (Client &other:clients) if (other.fd!=c.fd && other.ws) queue(other,bytes);
+        }
+    }
+    void server() {
+        int listener=socket(AF_INET,SOCK_STREAM|SOCK_NONBLOCK|SOCK_CLOEXEC,0);
+        if (listener<0) { std::perror("VST Visualizer socket"); return; }
+        int reuse=1; setsockopt(listener,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));
+        int port=8765;
+        if (const char *env=std::getenv("VSTVIS_PORT")) { char *end=nullptr; long n=std::strtol(env,&end,10); if (*env && !*end && n>0 && n<=65535) port=n; else std::fprintf(stderr,"VST Visualizer: invalid VSTVIS_PORT; using 8765\n"); }
+        sockaddr_in address{}; address.sin_family=AF_INET; address.sin_addr.s_addr=htonl(INADDR_ANY); address.sin_port=htons(port);
+        if (bind(listener,reinterpret_cast<sockaddr *>(&address),sizeof(address)) || listen(listener,16)) { std::perror("VST Visualizer bind/listen (audio continues)"); close(listener); return; }
+        std::fprintf(stderr,"VST Visualizer: listening on 0.0.0.0:%d\n",port);
+        std::vector<Client> clients;
+        uint64_t seenVersion;
+        { std::lock_guard<std::mutex> guard(stateMutex); seenVersion=stateVersion; }
+        std::array<Stereo,Samples> recent{}; size_t cursor=0;
+        double squaresL=0,squaresR=0,peak=0; uint64_t count=0;
+        auto nextAudio=Clock::now(), nextTransport=nextAudio;
+        try {
+            while (!stop.load()) {
+                uint64_t r=read.load(std::memory_order_relaxed), w=write.load(std::memory_order_acquire);
+                while (r!=w) {
+                    Stereo s=ring[r++%RingSize]; recent[cursor++%Samples]=s;
+                    double l=std::isfinite(s.l) ? s.l : 0, rr=std::isfinite(s.r) ? s.r : 0;
+                    squaresL+=l*l; squaresR+=rr*rr; peak=std::max(peak,std::max(std::abs(l),std::abs(rr))); ++count;
+                }
+                read.store(r,std::memory_order_release);
+                double tempo,position; bool play; uint32_t sig,seq;
+                do { seq=sequence.load(std::memory_order_acquire); tempo=bpm.load(); position=beat.load(); play=playing.load(); sig=signature.load(); } while ((seq&1) || seq!=sequence.load(std::memory_order_acquire));
+                auto now=Clock::now();
+                if (now>=nextAudio) {
+                    nextAudio=now+std::chrono::microseconds(16667);
+                    std::string payload(16+2*Samples,'\0'); payload[0]=1; payload[1]=play;
+                    payload[2]=Samples&255; payload[3]=Samples>>8;
+                    float f=tempo; uint32_t fb; uint64_t db; std::memcpy(&fb,&f,4); std::memcpy(&db,&position,8);
+                    for (int i=0;i<4;++i) payload[4+i]=char(fb>>(8*i));
+                    for (int i=0;i<8;++i) payload[8+i]=char(db>>(8*i));
+                    for (size_t i=0;i<Samples;++i) { Stereo s=recent[(cursor+i)%Samples];
+                        auto quant=[](float x)->char { if (!std::isfinite(x)) x=0; return char(uint8_t(128+std::clamp(x,-1.f,1.f)*127)); };
+                        payload[16+i]=quant(s.l); payload[16+Samples+i]=quant(s.r);
+                    }
+                    std::string bytes=frame(2,payload);
+                    for (Client &c:clients) if (c.ws && c.display) queue(c,bytes,true);
+                }
+                if (now>=nextTransport) {
+                    nextTransport=now+std::chrono::milliseconds(50);
+                    double rms=count ? std::sqrt(std::max(squaresL,squaresR)/count) : 0;
+                    std::string json="{\"type\":\"transport\",\"bpm\":"+number(tempo)+
+                        ",\"playing\":"+(play?"true":"false")+",\"beat\":"+number(position)+
+                        ",\"tsNum\":"+std::to_string(sig>>16)+",\"tsDen\":"+std::to_string(sig&65535)+
+                        ",\"rms\":"+number(std::min(1.0,rms))+",\"peak\":"+number(std::min(1.0,peak))+
+                        ",\"sampleRate\":"+number(sampleRate.load())+"}";
+                    for (Client &c:clients) if (c.ws) queue(c,frame(1,json));
+                    squaresL=squaresR=peak=0; count=0;
+                }
+                { std::lock_guard<std::mutex> guard(stateMutex);
+                    if (seenVersion!=stateVersion) { seenVersion=stateVersion; if (!state.empty()) for (Client &c:clients) if (c.ws) queue(c,frame(1,state)); }
+                }
+                std::vector<pollfd> fds{{listener,POLLIN,0}};
+                for (Client &c:clients) fds.push_back({c.fd,short((!c.closing?POLLIN:0)|((c.sent<c.output.size() || c.file>=0)?POLLOUT:0)),0});
+                int ready=poll(fds.data(),fds.size(),5);
+                if (ready<0 && errno!=EINTR) break;
+                for (size_t i=0;i<clients.size();++i) {
+                    Client &c=clients[i]; short events=fds[i+1].revents;
+                    if (events&(POLLERR|POLLNVAL)) c.dead=true;
+                    if ((events&POLLIN) && !c.dead) {
+                        char buffer[8192];
+                        // One bounded read per poll keeps a busy peer from starving other clients.
+                        ssize_t n=recv(c.fd,buffer,sizeof(buffer),0);
+                        if (n>0) {
+                            c.input.append(buffer,n);
+                            if (!c.ws) http(c);
+                            if (c.ws) websocket(c,clients,seenVersion);
+                            if (c.ws && c.input.size()>Limit+14) closeWS(c,1009);
+                        } else if (n==0 || (errno!=EAGAIN && errno!=EWOULDBLOCK && errno!=EINTR)) c.dead=true;
+                    }
+                    if ((events&POLLOUT) && !c.dead) {
+                        if (c.sent==c.output.size() && c.file>=0) {
+                            char buffer[16384]; ssize_t n=::read(c.file,buffer,sizeof(buffer));
+                            if (n>0) { c.output.assign(buffer,n); c.sent=0; }
+                            else { close(c.file); c.file=-1; if (n<0) c.dead=true; }
+                        }
+                        if (c.sent<c.output.size()) {
+                            ssize_t n=send(c.fd,c.output.data()+c.sent,c.output.size()-c.sent,MSG_NOSIGNAL);
+                            if (n>0) { c.sent+=n; c.progress=Clock::now(); }
+                            else if (n<0 && errno!=EAGAIN && errno!=EWOULDBLOCK && errno!=EINTR) c.dead=true;
+                        }
+                        if (c.sent==c.output.size()) { c.output.clear(); c.sent=0; if (c.closing && c.file<0) c.dead=true; }
+                    }
+                    if (events&POLLHUP) c.dead=true;
+                    if (((!c.ws || c.closing) || !c.output.empty()) && Clock::now()-c.progress>std::chrono::seconds(10)) c.dead=true;
+                }
+                for (auto it=clients.begin();it!=clients.end();) {
+                    if (it->dead) { close(it->fd); if (it->file>=0) close(it->file); it=clients.erase(it); } else ++it;
+                }
+                if (fds[0].revents&POLLIN) {
+                    int fd=accept4(listener,nullptr,nullptr,SOCK_NONBLOCK|SOCK_CLOEXEC);
+                    if (fd>=0) { if (clients.size()>=32) close(fd); else { clients.emplace_back(); clients.back().fd=fd; } }
+                }
+            }
+        } catch (...) { std::fprintf(stderr,"VST Visualizer: server stopped after resource failure; audio continues\n"); }
+        for (Client &c:clients) { close(c.fd); if (c.file>=0) close(c.file); }
+        close(listener);
+    }
+};
+Plugin &self(const clap_plugin_t *p) { return *static_cast<Plugin *>(p->plugin_data); }
+const char *features[]={CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,CLAP_PLUGIN_FEATURE_ANALYZER,CLAP_PLUGIN_FEATURE_STEREO,nullptr};
+const clap_plugin_descriptor_t descriptor={CLAP_VERSION,"org.vstvisualizer.visualizer","VST Visualizer","VST Visualizer","","","","1.0.0","Stereo passthrough with browser visualization",features};
+bool init(const clap_plugin_t *p) {
+    auto &s=self(p);
+    try {
+        if (s.host->get_extension) s.hostState=static_cast<const clap_host_state_t *>(s.host->get_extension(s.host,CLAP_EXT_STATE));
+        std::string root;
+        if (const char *env=std::getenv("VSTVIS_WEB_DIR")) root=env;
+        else { Dl_info info{}; if (dladdr(reinterpret_cast<void *>(&init),&info) && info.dli_fname) {
+            char resolved[4096]; std::string path=realpath(info.dli_fname,resolved) ? resolved : info.dli_fname;
+            root=path.substr(0,path.find_last_of('/'))+"/vstvisualizer.web";
+        } }
+        char resolved[4096]; if (realpath(root.c_str(),resolved)) s.webRoot=resolved;
+        return true;
+    } catch (...) { return false; }
+}
+bool activate(const clap_plugin_t *p,double rate,uint32_t,uint32_t) {
+    auto &s=self(p); if (!std::isfinite(rate) || rate<=0) return false; s.sampleRate=rate;
+    if (!s.worker.joinable()) try { s.worker=std::thread([&s]{s.server();}); } catch (...) { std::fprintf(stderr,"VST Visualizer: cannot start server; audio continues\n"); }
+    return true;
+}
+void transport(Plugin &s,const clap_event_transport_t *t) {
+    s.sequence.fetch_add(1,std::memory_order_acq_rel);
+    s.bpm=t && (t->flags&CLAP_TRANSPORT_HAS_TEMPO) && std::isfinite(t->tempo) ? t->tempo : 0;
+    s.beat=t && (t->flags&CLAP_TRANSPORT_HAS_BEATS_TIMELINE) ? double(t->song_pos_beats)/CLAP_BEATTIME_FACTOR : 0;
+    s.playing=t && (t->flags&CLAP_TRANSPORT_IS_PLAYING);
+    s.signature=t && (t->flags&CLAP_TRANSPORT_HAS_TIME_SIGNATURE) ? (uint32_t(t->tsig_num)<<16)|t->tsig_denom : (4u<<16)|4;
+    s.sequence.fetch_add(1,std::memory_order_release);
+}
+clap_process_status process(const clap_plugin_t *p,const clap_process_t *data) {
+    auto &s=self(p); transport(s,data->transport);
+    if (data->in_events) {
+        uint32_t n=data->in_events->size(data->in_events);
+        for (uint32_t i=0;i<n;++i) { const auto *e=data->in_events->get(data->in_events,i);
+            if (e && e->space_id==CLAP_CORE_EVENT_SPACE_ID && e->type==CLAP_EVENT_TRANSPORT && e->size>=sizeof(clap_event_transport_t)) transport(s,reinterpret_cast<const clap_event_transport_t *>(e)); }
+    }
+    if (!data->audio_outputs_count) return CLAP_PROCESS_CONTINUE;
+    auto &out=data->audio_outputs[0]; const auto *in=data->audio_inputs_count ? &data->audio_inputs[0] : nullptr;
+    if (!out.data32 && !out.data64) return CLAP_PROCESS_ERROR;
+    uint64_t w=s.write.load(std::memory_order_relaxed), r=s.read.load(std::memory_order_acquire);
+    size_t room=RingSize-(w-r);
+    for (uint32_t i=0;i<data->frames_count;++i) {
+        double values[2]={0,0};
+        for (uint32_t ch=0;ch<out.channel_count;++ch) {
+            uint32_t src=in && in->channel_count ? std::min(ch,in->channel_count-1) : 0;
+            if (out.data64) { double v=in && in->channel_count ? (in->data64 ? in->data64[src][i] : in->data32[src][i]) : 0; out.data64[ch][i]=v; if (ch<2) values[ch]=v; }
+            else { float v=in && in->channel_count ? (in->data32 ? in->data32[src][i] : float(in->data64[src][i])) : 0; out.data32[ch][i]=v; if (ch<2) values[ch]=v; }
+        }
+        if (out.channel_count==1) values[1]=values[0];
+        if (i<room) s.ring[w++%RingSize]={float(values[0]),float(values[1])};
+    }
+    out.constant_mask=0;
+    s.write.store(w,std::memory_order_release);
+    return CLAP_PROCESS_CONTINUE;
+}
+const clap_plugin_audio_ports_t ports={
+    [](const clap_plugin_t *,bool)->uint32_t {return 1;},
+    [](const clap_plugin_t *,uint32_t index,bool input,clap_audio_port_info_t *info)->bool {
+        if (index || !info) return false;
+        *info={}; info->id=0;
+        std::strcpy(info->name,input ? "Stereo Input" : "Stereo Output");
+        info->flags=CLAP_AUDIO_PORT_IS_MAIN|CLAP_AUDIO_PORT_SUPPORTS_64BITS|CLAP_AUDIO_PORT_REQUIRES_COMMON_SAMPLE_SIZE;
+        info->channel_count=2; info->port_type=CLAP_PORT_STEREO; info->in_place_pair=0; return true;
+    }
+};
+const clap_plugin_state_t stateExtension={
+    [](const clap_plugin_t *p,const clap_ostream_t *stream)->bool {
+        try { std::string state; { std::lock_guard<std::mutex> guard(self(p).stateMutex); state=self(p).state; }
+            size_t pos=0; while (pos<state.size()) { int64_t n=stream->write(stream,state.data()+pos,state.size()-pos); if (n<=0 || uint64_t(n)>state.size()-pos) return false; pos+=n; } return true;
+        } catch (...) {return false;}
+    },
+    [](const clap_plugin_t *p,const clap_istream_t *stream)->bool {
+        try { std::string state; char buffer[4096];
+            while (true) { int64_t n=stream->read(stream,buffer,sizeof(buffer)); if (n<0 || n>int64_t(sizeof(buffer))) return false; if (!n) break;
+                if (state.size()+n>Limit) return false;
+                state.append(buffer,n); }
+            if (!utf8(state)) return false;
+            auto &s=self(p); std::lock_guard<std::mutex> guard(s.stateMutex); s.state=std::move(state); ++s.stateVersion; return true;
+        } catch (...) {return false;}
+    }
+};
+const void *extension(const clap_plugin_t *,const char *id) {
+    if (!std::strcmp(id,CLAP_EXT_AUDIO_PORTS)) return &ports;
+    if (!std::strcmp(id,CLAP_EXT_STATE)) return &stateExtension;
+    return nullptr;
+}
+const clap_plugin_t *create(const clap_plugin_factory_t *,const clap_host_t *host,const char *id) {
+    if (!host || !clap_version_is_compatible(host->clap_version) || std::strcmp(id,descriptor.id)) return nullptr;
+    try { auto *s=new Plugin(host);
+        s->api={&descriptor,s,init,[](const clap_plugin_t *p){delete &self(p);},activate,
+            [](const clap_plugin_t *){},[](const clap_plugin_t *)->bool{return true;},[](const clap_plugin_t *){},
+            [](const clap_plugin_t *p){transport(self(p),nullptr);},process,extension,
+            [](const clap_plugin_t *p){auto &s=self(p); if (s.dirty.exchange(false) && s.hostState) s.hostState->mark_dirty(s.host);}};
+        return &s->api;
+    } catch (...) { return nullptr; }
+}
+const clap_plugin_factory_t factory={[](const clap_plugin_factory_t *)->uint32_t{return 1;},
+    [](const clap_plugin_factory_t *,uint32_t i)->const clap_plugin_descriptor_t *{return i ? nullptr : &descriptor;},create};
+} // namespace
+extern "C" CLAP_EXPORT const clap_plugin_entry_t clap_entry={CLAP_VERSION,
+    [](const char *)->bool{return true;},[](){},
+    [](const char *id)->const void *{return std::strcmp(id,CLAP_PLUGIN_FACTORY_ID) ? nullptr : &factory;}};

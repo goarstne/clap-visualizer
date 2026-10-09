@@ -1,0 +1,1056 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>VST Visualizer - Remote</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card-bg: #161b22;
+      --card-border: #30363d;
+      --accent: #38bdf8;
+      --accent-glow: rgba(56, 189, 248, 0.35);
+      --accent-hover: #0284c7;
+      --text: #f0f6fc;
+      --text-muted: #8b949e;
+      --success: #22c55e;
+      --danger: #ef4444;
+      --warning: #eab308;
+      --btn-bg: #21262d;
+      --btn-active: #30363d;
+      --radius: 12px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    /* Header */
+    header {
+      background: rgba(22, 27, 34, 0.95);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--card-border);
+      padding: 0.75rem 1rem;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--text);
+    }
+    .brand span.accent {
+      color: var(--accent);
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      font-size: 0.8rem;
+      font-weight: 500;
+      padding: 0.35rem 0.75rem;
+      border-radius: 9999px;
+      background: var(--btn-bg);
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      transition: all 0.2s ease;
+    }
+    .status-pill .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background-color: var(--danger);
+    }
+    .status-pill.connected .dot {
+      background-color: var(--success);
+      box-shadow: 0 0 8px var(--success);
+    }
+    .status-pill.connected {
+      color: var(--text);
+      border-color: rgba(34, 197, 94, 0.3);
+    }
+
+    /* Main Container */
+    .app-layout {
+      flex: 1;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 1rem;
+      padding: 1rem;
+      max-width: 1400px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    @media (min-width: 900px) {
+      .app-layout {
+        grid-template-columns: 420px minmax(0, 1fr);
+        height: calc(100vh - 60px);
+        overflow: hidden;
+      }
+      .controls-col {
+        overflow-y: auto;
+        padding-right: 0.25rem;
+      }
+      .presets-col {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        overflow: hidden;
+      }
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    /* Transport HUD */
+    .transport-hud {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .transport-metrics {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .play-badge {
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 0.35rem 0.65rem;
+      border-radius: 6px;
+      background: #21262d;
+      color: var(--text-muted);
+      letter-spacing: 0.05em;
+    }
+    .play-badge.playing {
+      background: rgba(34, 197, 94, 0.2);
+      color: var(--success);
+      border: 1px solid rgba(34, 197, 94, 0.4);
+    }
+
+    .beat-box {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+    .beat-led {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #30363d;
+      transition: background-color 0.05s ease, transform 0.05s ease;
+    }
+    .beat-led.flash {
+      background: var(--accent);
+      box-shadow: 0 0 12px var(--accent);
+      transform: scale(1.25);
+    }
+    .beat-text {
+      font-size: 0.9rem;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .bpm-text {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--accent);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .meter-container {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .meter-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+    .meter-bar-track {
+      flex: 1;
+      height: 8px;
+      background: #21262d;
+      border-radius: 4px;
+      overflow: hidden;
+      position: relative;
+    }
+    .meter-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #22c55e 0%, #eab308 75%, #ef4444 100%);
+      border-radius: 4px;
+      transition: width 0.05s ease-out;
+    }
+    .peak-indicator {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: #ffffff;
+      transition: left 0.05s ease-out;
+    }
+
+    /* Active Preset Card */
+    .current-preset-card {
+      position: relative;
+      border-left: 4px solid var(--accent);
+    }
+    .preset-label {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      font-weight: 600;
+      color: var(--text-muted);
+      letter-spacing: 0.05em;
+      margin-bottom: 0.25rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .preset-name-display {
+      font-size: 1.15rem;
+      font-weight: 700;
+      line-height: 1.3;
+      margin-bottom: 0.85rem;
+      word-break: break-word;
+      color: var(--text);
+    }
+
+    .preset-nav-bar {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 0.5rem;
+    }
+
+    /* Buttons */
+    button {
+      font-family: inherit;
+      cursor: pointer;
+      border: 1px solid var(--card-border);
+      background: var(--btn-bg);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 0.65rem 0.5rem;
+      font-size: 0.875rem;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.35rem;
+      transition: all 0.15s ease;
+      touch-action: manipulation;
+      min-height: 44px;
+    }
+    button:active {
+      transform: scale(0.97);
+      background: var(--btn-active);
+    }
+    button.primary {
+      background: var(--accent);
+      color: #090d16;
+      border-color: var(--accent);
+    }
+    button.primary:active {
+      background: var(--accent-hover);
+    }
+    button.active {
+      background: rgba(56, 189, 248, 0.18);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    button.locked-btn.is-locked {
+      background: rgba(239, 68, 68, 0.2);
+      border-color: var(--danger);
+      color: var(--danger);
+    }
+
+    /* Segmented controls (Auto bars) */
+    .control-group {
+      margin-bottom: 1.1rem;
+    }
+    .control-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.825rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
+    }
+    .control-header .val {
+      color: var(--accent);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .segmented-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 0.35rem;
+    }
+    .segmented-btn {
+      padding: 0.5rem 0.25rem;
+      font-size: 0.8rem;
+      border-radius: 6px;
+    }
+
+    /* Range Sliders */
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 6px;
+      background: #21262d;
+      border-radius: 3px;
+      outline: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: var(--accent);
+      cursor: pointer;
+      box-shadow: 0 0 6px rgba(0, 0, 0, 0.4);
+    }
+    input[type="range"]::-moz-range-thumb {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: none;
+      cursor: pointer;
+      box-shadow: 0 0 6px rgba(0, 0, 0, 0.4);
+    }
+
+    /* Toggles Grid */
+    .toggles-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+    }
+
+    /* Presets Browser */
+    .search-bar-row {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+    }
+    .search-input-wrapper {
+      position: relative;
+      flex: 1;
+    }
+    .search-input {
+      width: 100%;
+      background: #21262d;
+      border: 1px solid var(--card-border);
+      color: var(--text);
+      font-size: 0.95rem;
+      padding: 0.65rem 0.75rem;
+      padding-right: 2rem;
+      border-radius: 8px;
+      outline: none;
+    }
+    .search-input:focus {
+      border-color: var(--accent);
+    }
+    .clear-search-btn {
+      position: absolute;
+      right: 0.4rem;
+      top: 50%;
+      transform: translateY(-50%);
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 1rem;
+      padding: 0.2rem 0.5rem;
+      min-height: auto;
+      cursor: pointer;
+    }
+
+    .filter-tabs {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+    }
+    .tab-btn {
+      flex: 1;
+      font-size: 0.8rem;
+      min-height: 38px;
+      padding: 0.4rem 0.6rem;
+    }
+
+    .preset-list-container {
+      flex: 1;
+      overflow-y: auto;
+      border-radius: var(--radius);
+      border: 1px solid var(--card-border);
+      background: #11141a;
+      min-height: 340px;
+      max-height: 60vh;
+    }
+    @media (min-width: 900px) {
+      .preset-list-container {
+        max-height: none;
+        height: 100%;
+      }
+    }
+
+    .preset-item {
+      display: flex;
+      align-items: center;
+      padding: 0.7rem 0.85rem;
+      border-bottom: 1px solid #1c2128;
+      cursor: pointer;
+      transition: background-color 0.1s ease;
+      touch-action: manipulation;
+    }
+    .preset-item:active {
+      background-color: #1e2430;
+    }
+    .preset-item.active {
+      background: rgba(56, 189, 248, 0.14);
+      border-left: 3px solid var(--accent);
+    }
+    .preset-fav-star {
+      background: transparent;
+      border: none;
+      font-size: 1.15rem;
+      color: #484f58;
+      padding: 0.2rem 0.5rem 0.2rem 0;
+      margin-right: 0.4rem;
+      min-height: auto;
+      cursor: pointer;
+    }
+    .preset-fav-star.fav {
+      color: var(--warning);
+      text-shadow: 0 0 6px rgba(234, 179, 8, 0.4);
+    }
+    .preset-item-name {
+      flex: 1;
+      font-size: 0.9rem;
+      font-weight: 500;
+      color: #e6edf3;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .preset-item.active .preset-item-name {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .empty-state {
+      padding: 2.5rem 1rem;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span>VST</span><span class="accent">VISUALIZER</span>
+    </div>
+    <div id="status-pill" class="status-pill">
+      <span class="dot"></span>
+      <span id="status-label">Verbinde...</span>
+    </div>
+  </header>
+
+  <main class="app-layout">
+    <!-- Left Column: Transport, Quick Controls, Automation -->
+    <div class="controls-col">
+      <!-- Transport HUD -->
+      <section class="card transport-hud">
+        <div class="transport-metrics">
+          <span id="play-status" class="play-badge">STOP</span>
+          <div class="beat-box">
+            <span id="beat-led" class="beat-led"></span>
+            <span id="beat-text" class="beat-text">Takt &mdash;</span>
+          </div>
+          <span id="bpm-display" class="bpm-text">&mdash; BPM</span>
+        </div>
+
+        <div class="meter-container">
+          <div class="meter-row">
+            <span>RMS</span>
+            <div class="meter-bar-track">
+              <div id="rms-fill" class="meter-bar-fill"></div>
+            </div>
+          </div>
+          <div class="meter-row">
+            <span>PEAK</span>
+            <div class="meter-bar-track">
+              <div id="peak-fill" class="meter-bar-fill"></div>
+              <div id="peak-tick" class="peak-indicator" style="left: 0%;"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Active Preset & Nav -->
+      <section class="card current-preset-card">
+        <div class="preset-label">
+          <span>Aktuelles Preset</span>
+          <span id="lock-badge" style="display:none; color: var(--danger); font-weight: 700;">🔒 GESPERRT</span>
+        </div>
+        <div id="current-preset-name" class="preset-name-display">&mdash;</div>
+        <div class="preset-nav-bar">
+          <button id="btn-prev" title="Vorheriges Preset">⏮ Zurück</button>
+          <button id="btn-rand" title="Zufälliges Preset">🎲 Zufall</button>
+          <button id="btn-next" title="Nächstes Preset">⏭ Weiter</button>
+        </div>
+      </section>
+
+      <!-- Live Parameters & Automation -->
+      <section class="card">
+        <!-- Blend Time Slider -->
+        <div class="control-group">
+          <div class="control-header">
+            <span>Blendzeit</span>
+            <span id="blend-val" class="val">2.0 s</span>
+          </div>
+          <div class="slider-row">
+            <input type="range" id="blend-slider" min="0" max="10" step="0.2" value="2.0">
+          </div>
+        </div>
+
+        <!-- Auto Bars (N Takte) -->
+        <div class="control-group">
+          <div class="control-header">
+            <span>Auto-Wechsel (Takte)</span>
+            <span id="autobars-val" class="val">8 Takte</span>
+          </div>
+          <div class="segmented-grid">
+            <button class="segmented-btn" data-bars="0">Aus</button>
+            <button class="segmented-btn" data-bars="4">4</button>
+            <button class="segmented-btn" data-bars="8">8</button>
+            <button class="segmented-btn" data-bars="16">16</button>
+            <button class="segmented-btn" data-bars="32">32</button>
+          </div>
+        </div>
+
+        <!-- Toggles: Random & Lock -->
+        <div class="control-group">
+          <div class="toggles-grid">
+            <button id="btn-toggle-random" class="active">
+              <span>🎲 Auto-Zufall: AN</span>
+            </button>
+            <button id="btn-toggle-lock" class="locked-btn">
+              <span>🔓 Entsperrt</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Audio Gain / Sensitivity -->
+        <div class="control-group">
+          <div class="control-header">
+            <span>Audio-Empfindlichkeit (Gain)</span>
+            <span id="gain-val" class="val">1.0x</span>
+          </div>
+          <div class="slider-row">
+            <input type="range" id="gain-slider" min="0.2" max="3.0" step="0.1" value="1.0">
+          </div>
+        </div>
+
+        <!-- Brightness -->
+        <div class="control-group" style="margin-bottom: 0;">
+          <div class="control-header">
+            <span>Helligkeit</span>
+            <span id="brightness-val" class="val">100%</span>
+          </div>
+          <div class="slider-row">
+            <input type="range" id="brightness-slider" min="0.2" max="2.0" step="0.05" value="1.0">
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Right Column: Preset Browser -->
+    <div class="presets-col">
+      <section class="card" style="margin-bottom: 0; display: flex; flex-direction: column; height: 100%;">
+        <div class="search-bar-row">
+          <div class="search-input-wrapper">
+            <input type="text" id="preset-search" class="search-input" placeholder="🔍 Preset suchen..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+            <button id="btn-clear-search" class="clear-search-btn" style="display: none;">✕</button>
+          </div>
+        </div>
+
+        <div class="filter-tabs">
+          <button id="tab-all" class="tab-btn active">Alle (<span id="count-all">0</span>)</button>
+          <button id="tab-favs" class="tab-btn">★ Favoriten (<span id="count-favs">0</span>)</button>
+        </div>
+
+        <div id="preset-list" class="preset-list-container">
+          <!-- Preset Items rendered dynamically -->
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script src="vendor/butterchurnPresets.min.js"></script>
+  <script src="vendor/butterchurnPresetsExtra.min.js"></script>
+  <script src="ws.js"></script>
+  <script>
+    (function () {
+      'use strict';
+
+      // Load presets dictionary
+      const presetsMap = Object.assign(
+        {},
+        (window.butterchurnPresets && (window.butterchurnPresets.getPresets || window.butterchurnPresets.default?.getPresets))?.() || {},
+        (window.butterchurnPresetsExtra && (window.butterchurnPresetsExtra.getPresets || window.butterchurnPresetsExtra.default?.getPresets))?.() || {}
+      );
+      const allPresets = Object.keys(presetsMap);
+
+      // Local favorites persistence
+      const FAV_KEY = 'vstvis_favs';
+      let favorites = new Set();
+      try {
+        const stored = localStorage.getItem(FAV_KEY);
+        if (stored) {
+          const arr = JSON.parse(stored);
+          if (Array.isArray(arr)) {
+            favorites = new Set(arr);
+          }
+        }
+      } catch (e) {
+        console.warn('LocalStorage error:', e);
+      }
+
+      function saveFavorites() {
+        try {
+          localStorage.setItem(FAV_KEY, JSON.stringify(Array.from(favorites)));
+        } catch (e) {}
+      }
+
+      // Application State
+      let state = {
+        type: 'state',
+        preset: allPresets[0] || '',
+        blend: 2.0,
+        autoBars: 8,
+        random: true,
+        locked: false,
+        gain: 1.0,
+        brightness: 1.0
+      };
+
+      // UI Element references
+      const statusPill = document.getElementById('status-pill');
+      const statusLabel = document.getElementById('status-label');
+      const playStatusBadge = document.getElementById('play-status');
+      const beatLed = document.getElementById('beat-led');
+      const beatText = document.getElementById('beat-text');
+      const bpmDisplay = document.getElementById('bpm-display');
+      const rmsFill = document.getElementById('rms-fill');
+      const peakFill = document.getElementById('peak-fill');
+      const peakTick = document.getElementById('peak-tick');
+
+      const currentPresetName = document.getElementById('current-preset-name');
+      const lockBadge = document.getElementById('lock-badge');
+      const btnPrev = document.getElementById('btn-prev');
+      const btnRand = document.getElementById('btn-rand');
+      const btnNext = document.getElementById('btn-next');
+
+      const blendVal = document.getElementById('blend-val');
+      const blendSlider = document.getElementById('blend-slider');
+      const autobarsVal = document.getElementById('autobars-val');
+      const autobarsBtns = document.querySelectorAll('.segmented-btn');
+
+      const btnToggleRandom = document.getElementById('btn-toggle-random');
+      const btnToggleLock = document.getElementById('btn-toggle-lock');
+
+      const gainVal = document.getElementById('gain-val');
+      const gainSlider = document.getElementById('gain-slider');
+      const brightnessVal = document.getElementById('brightness-val');
+      const brightnessSlider = document.getElementById('brightness-slider');
+
+      const presetSearch = document.getElementById('preset-search');
+      const btnClearSearch = document.getElementById('btn-clear-search');
+      const tabAll = document.getElementById('tab-all');
+      const tabFavs = document.getElementById('tab-favs');
+      const countAll = document.getElementById('count-all');
+      const countFavs = document.getElementById('count-favs');
+      const presetListEl = document.getElementById('preset-list');
+
+      let currentTab = 'all'; // 'all' or 'favs'
+      let searchQuery = '';
+      let lastBeatInt = null;
+
+      // Socket setup
+      const socket = new VisualizerSocket({
+        role: 'remote',
+        onStatus: (status) => {
+          if (status === 'connected') {
+            statusPill.className = 'status-pill connected';
+            statusLabel.textContent = 'Verbunden';
+          } else if (status === 'connecting') {
+            statusPill.className = 'status-pill';
+            statusLabel.textContent = 'Verbinde...';
+          } else {
+            statusPill.className = 'status-pill';
+            statusLabel.textContent = 'Getrennt';
+          }
+        },
+        onState: (incomingState) => {
+          // Adopt incoming state from other clients or initial state from server
+          applyState(incomingState);
+        },
+        onTransport: (transport) => {
+          renderTransport(transport);
+        }
+      });
+
+      function applyState(newState) {
+        state = { ...state, ...newState };
+        renderStateUI();
+      }
+
+      function updateAndBroadcast(partial) {
+        state = { ...state, ...partial };
+        renderStateUI();
+        socket.sendState(state);
+      }
+
+      // Render State to UI
+      function renderStateUI() {
+        // Preset Name & Lock Badge
+        currentPresetName.textContent = state.preset || '—';
+        lockBadge.style.display = state.locked ? 'inline' : 'none';
+
+        // Blend slider
+        blendSlider.value = state.blend;
+        blendVal.textContent = Number(state.blend).toFixed(1) + ' s';
+
+        // Auto Bars
+        autobarsVal.textContent = state.autoBars === 0 ? 'Aus' : state.autoBars + ' Takte';
+        autobarsBtns.forEach(btn => {
+          const b = parseInt(btn.dataset.bars, 10);
+          if (b === state.autoBars) {
+            btn.classList.add('active');
+          } else {
+            btn.classList.remove('active');
+          }
+        });
+
+        // Random Toggle
+        if (state.random) {
+          btnToggleRandom.classList.add('active');
+          btnToggleRandom.querySelector('span').textContent = '🎲 Auto-Zufall: AN';
+        } else {
+          btnToggleRandom.classList.remove('active');
+          btnToggleRandom.querySelector('span').textContent = '🔁 Auto-Zufall: AUS';
+        }
+
+        // Lock Toggle
+        if (state.locked) {
+          btnToggleLock.classList.add('is-locked');
+          btnToggleLock.querySelector('span').textContent = '🔒 Gesperrt';
+        } else {
+          btnToggleLock.classList.remove('is-locked');
+          btnToggleLock.querySelector('span').textContent = '🔓 Entsperrt';
+        }
+
+        // Gain
+        const gain = typeof state.gain === 'number' ? state.gain : 1.0;
+        gainSlider.value = gain;
+        gainVal.textContent = gain.toFixed(1) + 'x';
+
+        // Brightness
+        const br = typeof state.brightness === 'number' ? state.brightness : 1.0;
+        brightnessSlider.value = br;
+        brightnessVal.textContent = Math.round(br * 100) + '%';
+
+        // Highlight in list
+        highlightActivePreset();
+      }
+
+      // Render Transport data
+      function renderTransport(t) {
+        // Play / Stop
+        if (t.playing) {
+          playStatusBadge.textContent = 'PLAY';
+          playStatusBadge.classList.add('playing');
+        } else {
+          playStatusBadge.textContent = 'STOP';
+          playStatusBadge.classList.remove('playing');
+        }
+
+        // BPM
+        if (typeof t.bpm === 'number' && t.bpm > 0) {
+          bpmDisplay.textContent = t.bpm.toFixed(1) + ' BPM';
+        } else {
+          bpmDisplay.textContent = '— BPM';
+        }
+
+        // Beat & Flash
+        if (typeof t.beat === 'number') {
+          const tsNum = t.tsNum || 4;
+          const tsDen = t.tsDen || 4;
+          const beatsPerBar = tsNum * (4 / tsDen);
+          const barNum = Math.floor(t.beat / beatsPerBar) + 1;
+          const beatInBar = (Math.floor(t.beat) % Math.round(beatsPerBar)) + 1;
+          beatText.textContent = `Takt ${barNum}.${beatInBar}`;
+
+          const beatInt = Math.floor(t.beat);
+          if (beatInt !== lastBeatInt && t.playing) {
+            lastBeatInt = beatInt;
+            beatLed.classList.add('flash');
+            setTimeout(() => {
+              beatLed.classList.remove('flash');
+            }, 120);
+          }
+        } else {
+          beatText.textContent = 'Takt —';
+        }
+
+        // RMS & Peak meters (0.0 to 1.0 linear)
+        const rms = typeof t.rms === 'number' ? Math.min(1, Math.max(0, t.rms)) : 0;
+        const peak = typeof t.peak === 'number' ? Math.min(1, Math.max(0, t.peak)) : 0;
+
+        rmsFill.style.width = (rms * 100).toFixed(1) + '%';
+        peakFill.style.width = (peak * 100).toFixed(1) + '%';
+        peakTick.style.left = (peak * 100).toFixed(1) + '%';
+      }
+
+      // Navigation Actions
+      function getFilteredList() {
+        return allPresets.filter(name => {
+          if (currentTab === 'favs' && !favorites.has(name)) return false;
+          if (searchQuery && !name.toLowerCase().includes(searchQuery)) return false;
+          return true;
+        });
+      }
+
+      btnPrev.addEventListener('click', () => {
+        const list = getFilteredList().length > 0 ? getFilteredList() : allPresets;
+        if (list.length === 0) return;
+        const idx = list.indexOf(state.preset);
+        const prevIdx = (idx <= 0 ? list.length - 1 : idx - 1);
+        updateAndBroadcast({ preset: list[prevIdx] });
+      });
+
+      btnNext.addEventListener('click', () => {
+        const list = getFilteredList().length > 0 ? getFilteredList() : allPresets;
+        if (list.length === 0) return;
+        const idx = list.indexOf(state.preset);
+        const nextIdx = (idx >= 0 ? idx + 1 : 0) % list.length;
+        updateAndBroadcast({ preset: list[nextIdx] });
+      });
+
+      btnRand.addEventListener('click', () => {
+        const list = getFilteredList().length > 0 ? getFilteredList() : allPresets;
+        if (list.length <= 1) return;
+        let pick = state.preset;
+        let guard = 0;
+        while (pick === state.preset && guard < 15) {
+          const idx = Math.floor(Math.random() * list.length);
+          pick = list[idx];
+          guard++;
+        }
+        updateAndBroadcast({ preset: pick });
+      });
+
+      // Controls event listeners
+      blendSlider.addEventListener('input', () => {
+        const val = parseFloat(blendSlider.value);
+        blendVal.textContent = val.toFixed(1) + ' s';
+      });
+      blendSlider.addEventListener('change', () => {
+        updateAndBroadcast({ blend: parseFloat(blendSlider.value) });
+      });
+
+      autobarsBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+          const bars = parseInt(btn.dataset.bars, 10);
+          updateAndBroadcast({ autoBars: bars });
+        });
+      });
+
+      btnToggleRandom.addEventListener('click', () => {
+        updateAndBroadcast({ random: !state.random });
+      });
+
+      btnToggleLock.addEventListener('click', () => {
+        updateAndBroadcast({ locked: !state.locked });
+      });
+
+      gainSlider.addEventListener('input', () => {
+        const val = parseFloat(gainSlider.value);
+        gainVal.textContent = val.toFixed(1) + 'x';
+      });
+      gainSlider.addEventListener('change', () => {
+        updateAndBroadcast({ gain: parseFloat(gainSlider.value) });
+      });
+
+      brightnessSlider.addEventListener('input', () => {
+        const val = parseFloat(brightnessSlider.value);
+        brightnessVal.textContent = Math.round(val * 100) + '%';
+      });
+      brightnessSlider.addEventListener('change', () => {
+        updateAndBroadcast({ brightness: parseFloat(brightnessSlider.value) });
+      });
+
+      // Search & Filter
+      presetSearch.addEventListener('input', () => {
+        searchQuery = presetSearch.value.trim().toLowerCase();
+        btnClearSearch.style.display = searchQuery.length > 0 ? 'block' : 'none';
+        renderPresetList();
+      });
+
+      btnClearSearch.addEventListener('click', () => {
+        presetSearch.value = '';
+        searchQuery = '';
+        btnClearSearch.style.display = 'none';
+        renderPresetList();
+      });
+
+      tabAll.addEventListener('click', () => {
+        if (currentTab !== 'all') {
+          currentTab = 'all';
+          tabAll.classList.add('active');
+          tabFavs.classList.remove('active');
+          renderPresetList();
+        }
+      });
+
+      tabFavs.addEventListener('click', () => {
+        if (currentTab !== 'favs') {
+          currentTab = 'favs';
+          tabFavs.classList.add('active');
+          tabAll.classList.remove('active');
+          renderPresetList();
+        }
+      });
+
+      // Render Presets List
+      function renderPresetList() {
+        countAll.textContent = allPresets.length;
+        countFavs.textContent = favorites.size;
+
+        const filtered = getFilteredList();
+        presetListEl.innerHTML = '';
+
+        if (filtered.length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'empty-state';
+          empty.textContent = currentTab === 'favs' ? 'Keine Favoriten vorhanden. Markiere Presets mit dem Stern ★.' : 'Keine Presets gefunden.';
+          presetListEl.appendChild(empty);
+          return;
+        }
+
+        const frag = document.createDocumentFragment();
+        filtered.forEach(name => {
+          const item = document.createElement('div');
+          item.className = 'preset-item' + (name === state.preset ? ' active' : '');
+          item.dataset.name = name;
+
+          const star = document.createElement('button');
+          star.className = 'preset-fav-star' + (favorites.has(name) ? ' fav' : '');
+          star.textContent = favorites.has(name) ? '★' : '☆';
+          star.title = favorites.has(name) ? 'Aus Favoriten entfernen' : 'Zu Favoriten hinzufügen';
+          star.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (favorites.has(name)) {
+              favorites.delete(name);
+              star.className = 'preset-fav-star';
+              star.textContent = '☆';
+            } else {
+              favorites.add(name);
+              star.className = 'preset-fav-star fav';
+              star.textContent = '★';
+            }
+            saveFavorites();
+            countFavs.textContent = favorites.size;
+            if (currentTab === 'favs') {
+              renderPresetList();
+            }
+          });
+
+          const label = document.createElement('span');
+          label.className = 'preset-item-name';
+          label.textContent = name;
+
+          item.appendChild(star);
+          item.appendChild(label);
+
+          item.addEventListener('click', () => {
+            updateAndBroadcast({ preset: name });
+          });
+
+          frag.appendChild(item);
+        });
+
+        presetListEl.appendChild(frag);
+        highlightActivePreset(true);
+      }
+
+      function highlightActivePreset(scrollIntoView = false) {
+        const items = presetListEl.querySelectorAll('.preset-item');
+        items.forEach(el => {
+          if (el.dataset.name === state.preset) {
+            el.classList.add('active');
+            if (scrollIntoView) {
+              el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            }
+          } else {
+            el.classList.remove('active');
+          }
+        });
+      }
+
+      // Initial Render
+      renderStateUI();
+      renderPresetList();
+    })();
+  </script>
+</body>
+</html>

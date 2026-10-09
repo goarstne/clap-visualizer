@@ -1,0 +1,6 @@
+build/
+node_modules/
+*.o
+*.clap
+.playwright-mcp/
+tools/fakehost
