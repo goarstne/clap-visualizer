@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PostFX Test</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 1rem;
+      background: #111318;
+      color: #e5e7eb;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    h1 { font-size: 1.1rem; margin: 0 0 0.75rem; }
+    .wrap { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-start; }
+    .stage { flex: 1 1 480px; max-width: 520px; }
+    #out { width: 100%; height: auto; display: block; background: #000; border: 1px solid #2b2f3a; }
+    .srcs { display: flex; gap: 0.75rem; margin-top: 0.75rem; }
+    .srcs canvas { width: 48%; border: 1px solid #2b2f3a; background: #000; }
+    .srcs .label { font-size: 0.75rem; color: #9ca3af; margin-bottom: 0.25rem; }
+    .controls { flex: 0 1 360px; max-width: 400px; }
+    .row { display: grid; grid-template-columns: 5.5rem 1fr 3rem; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; font-size: 0.85rem; }
+    .row input[type=range] { width: 100%; }
+    .row .v { text-align: right; color: #9ca3af; font-variant-numeric: tabular-nums; }
+    button {
+      margin: 0.75rem 0.25rem 0.75rem 0;
+      padding: 0.5rem 1rem;
+      font-size: 0.9rem;
+      border: 1px solid #3b4252;
+      border-radius: 6px;
+      background: #1f2430;
+      color: #e5e7eb;
+      cursor: pointer;
+    }
+    button:active { background: #2b3140; }
+    #results {
+      margin-top: 0.5rem;
+      padding: 0.75rem;
+      background: #0c0e12;
+      border: 1px solid #2b2f3a;
+      border-radius: 6px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.8rem;
+      white-space: pre-wrap;
+      min-height: 2rem;
+    }
+    .pass { color: #4ade80; }
+    .fail { color: #f87171; }
+    #no-gl { color: #f87171; display: none; }
+  </style>
+</head>
+<body>
+  <h1>PostFX Test</h1>
+  <div id="no-gl">WebGL2 nicht verfügbar.</div>
+
+  <div class="wrap">
+    <div class="stage">
+      <canvas id="out" width="480" height="360"></canvas>
+      <div class="srcs">
+        <div>
+          <div class="label">Quelle A (Farbbalken)</div>
+          <canvas id="srcA" width="480" height="360"></canvas>
+        </div>
+        <div>
+          <div class="label">Quelle B (Formen)</div>
+          <canvas id="srcB" width="480" height="360"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <div id="sliders"></div>
+      <div>
+        <button id="selftest-btn">Selftest</button>
+        <button id="reset-btn">Standard</button>
+      </div>
+    </div>
+  </div>
+
+  <pre id="results"></pre>
+
+  <script src="postfx.js"></script>
+  <script>
+    (function () {
+      'use strict';
+
+      var SLIDERS = [
+        ['mix', 0, 1, 0.01, 0],
+        ['hue', 0, 360, 1, 0],
+        ['sat', 0, 2, 0.01, 1],
+        ['bright', 0, 2, 0.01, 1],
+        ['contrast', 0, 2, 0.01, 1],
+        ['invert', 0, 1, 0.01, 0],
+        ['kaleido', 0, 12, 1, 0],
+        ['mirror', 0, 3, 1, 0],
+        ['trails', 0, 0.97, 0.01, 0],
+        ['rgb', 0, 1, 0.01, 0],
+        ['flash', 0, 1, 0.01, 0],
+        ['black', 0, 1, 0.01, 0]
+      ];
+
+      var params = {};
+      SLIDERS.forEach(function (s) { params[s[0]] = s[4]; });
+
+      var W = 480, H = 360;
+      var out = document.getElementById('out');
+      var srcA = document.getElementById('srcA');
+      var srcB = document.getElementById('srcB');
+      var ctxA = srcA.getContext('2d');
+      var ctxB = srcB.getContext('2d');
+
+      // Build sliders.
+      var sliders = document.getElementById('sliders');
+      var inputs = {};
+      SLIDERS.forEach(function (s) {
+        var name = s[0], min = s[1], max = s[2], step = s[3], def = s[4];
+        var row = document.createElement('div');
+        row.className = 'row';
+
+        var lab = document.createElement('label');
+        lab.textContent = name;
+
+        var inp = document.createElement('input');
+        inp.type = 'range';
+        inp.min = min; inp.max = max; inp.step = step; inp.value = def;
+
+        var v = document.createElement('span');
+        v.className = 'v';
+        v.textContent = def;
+
+        inp.addEventListener('input', function () {
+          params[name] = parseFloat(inp.value);
+          v.textContent = inp.value;
+        });
+
+        row.appendChild(lab);
+        row.appendChild(inp);
+        row.appendChild(v);
+        sliders.appendChild(row);
+        inputs[name] = inp;
+      });
+
+      document.getElementById('reset-btn').addEventListener('click', function () {
+        SLIDERS.forEach(function (s) {
+          var name = s[0], def = s[4];
+          params[name] = def;
+          inputs[name].value = def;
+          var row = inputs[name].closest('.row');
+          row.querySelector('.v').textContent = def;
+        });
+      });
+
+      var fx = window.PostFX ? window.PostFX.create(out) : null;
+      if (!fx) {
+        document.getElementById('no-gl').style.display = 'block';
+      } else {
+        fx.resize(W, H);
+      }
+
+      // Animated sources.
+      function drawBars(ctx, w, h, t) {
+        var bars = 8, bw = w / bars;
+        for (var i = 0; i < bars; i++) {
+          var hue = (i / bars * 360 + t * 0.03) % 360;
+          ctx.fillStyle = 'hsl(' + hue + ',100%,50%)';
+          ctx.fillRect(i * bw, 0, bw, h);
+        }
+      }
+
+      function drawShapes(ctx, w, h, t) {
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, w, h);
+        var cx = ((Math.sin(t * 0.001) + 1) / 2) * w;
+        for (var i = 0; i < 6; i++) {
+          var x = (cx + i * 70) % w;
+          var y = h / 2 + Math.sin(t * 0.002 + i) * (h / 3);
+          ctx.fillStyle = 'rgb(255,255,255)';
+          ctx.beginPath();
+          ctx.arc(x, y, 24, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      function frame(t) {
+        if (fx) {
+          drawBars(ctxA, W, H, t);
+          drawShapes(ctxB, W, H, t);
+          fx.render(srcA, srcB, params);
+        }
+        requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+
+      // --- Selftest ---
+      var resultsEl = document.getElementById('results');
+
+      function report(name, ok, detail) {
+        var line = (ok ? 'PASS ' : 'FAIL ') + name + (detail ? '  (' + detail + ')' : '');
+        console.log(line);
+        var span = document.createElement('span');
+        span.className = ok ? 'pass' : 'fail';
+        span.textContent = line + '\n';
+        resultsEl.appendChild(span);
+      }
+
+      function makeTestCanvas(w, h, pick) {
+        var c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        var ctx = c.getContext('2d');
+        var img = ctx.createImageData(w, h);
+        var d = img.data;
+        for (var y = 0; y < h; y++) {
+          for (var x = 0; x < w; x++) {
+            var rgb = pick(x, y);
+            var i = (y * w + x) * 4;
+            d[i] = rgb[0]; d[i + 1] = rgb[1]; d[i + 2] = rgb[2]; d[i + 3] = 255;
+          }
+        }
+        ctx.putImageData(img, 0, 0);
+        return c;
+      }
+
+      function solidData(w, h, r, g, b) {
+        var d = new Uint8ClampedArray(w * h * 4);
+        for (var i = 0; i < w * h; i++) {
+          d[i * 4] = r; d[i * 4 + 1] = g; d[i * 4 + 2] = b; d[i * 4 + 3] = 255;
+        }
+        return d;
+      }
+
+      function invertData(src) {
+        var d = new Uint8ClampedArray(src.length);
+        for (var i = 0; i < src.length; i += 4) {
+          d[i] = 255 - src[i];
+          d[i + 1] = 255 - src[i + 1];
+          d[i + 2] = 255 - src[i + 2];
+          d[i + 3] = 255;
+        }
+        return d;
+      }
+
+      function runSelftest() {
+        resultsEl.textContent = '';
+        console.log('--- PostFX Selftest ---');
+
+        var w = 64, h = 64;
+        var canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        var fx2 = window.PostFX ? window.PostFX.create(canvas) : null;
+        if (!fx2) {
+          report('WebGL2 verfügbar', false);
+          return;
+        }
+        fx2.resize(w, h);
+
+        var A = makeTestCanvas(w, h, function (x, y) {
+          if (y < h / 2) return x < w / 2 ? [255, 0, 0] : [0, 255, 0];
+          return x < w / 2 ? [0, 0, 255] : [255, 255, 255];
+        });
+        var B = makeTestCanvas(w, h, function (x, y) {
+          if (y < h / 2) return x < w / 2 ? [255, 255, 0] : [255, 0, 255];
+          return x < w / 2 ? [0, 255, 255] : [0, 0, 0];
+        });
+        var Adata = A.getContext('2d').getImageData(0, 0, w, h).data;
+        var Bdata = B.getContext('2d').getImageData(0, 0, w, h).data;
+
+        var read = document.createElement('canvas');
+        read.width = w; read.height = h;
+        var rctx = read.getContext('2d');
+
+        function grab() {
+          rctx.clearRect(0, 0, w, h);
+          rctx.drawImage(canvas, 0, 0);
+          return rctx.getImageData(0, 0, w, h).data;
+        }
+
+        function maxDiff(got, exp) {
+          var m = 0;
+          for (var i = 0; i < got.length; i += 4) {
+            var d = Math.abs(got[i] - exp[i]);
+            if (d > m) m = d;
+            d = Math.abs(got[i + 1] - exp[i + 1]);
+            if (d > m) m = d;
+            d = Math.abs(got[i + 2] - exp[i + 2]);
+            if (d > m) m = d;
+          }
+          return m;
+        }
+
+        function check(name, p, exp, tol) {
+          fx2.render(A, B, p);
+          var got = grab();
+          var d = maxDiff(got, exp);
+          report(name, d <= tol, 'maxDiff=' + d);
+        }
+
+        var TOL = 4;
+        check('Standardwerte == Quelle A', {}, Adata, TOL);
+        check('mix=1 == Quelle B', { mix: 1 }, Bdata, TOL);
+        check('black=1 == Schwarz', { black: 1 }, solidData(w, h, 0, 0, 0), TOL);
+        check('flash=1 == Weiss', { flash: 1 }, solidData(w, h, 255, 255, 255), TOL);
+        check('invert=1 == invertierte Quelle A', { invert: 1 }, invertData(Adata), TOL);
+
+        fx2.destroy();
+      }
+
+      document.getElementById('selftest-btn').addEventListener('click', runSelftest);
+
+      if (new URLSearchParams(window.location.search).has('selftest')) {
+        requestAnimationFrame(runSelftest);
+      }
+    })();
+  </script>
+</body>
+</html>
