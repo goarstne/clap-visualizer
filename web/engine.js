@@ -39,6 +39,9 @@
     // A complete incoming sync map can also remove a previously enabled coupling.
     if (raw.sync && typeof raw.sync === 'object') state.sync = { ...object(raw.sync) };
     state.type = 'state'; state.v = 2;
+    // Shader types were renamed when the interface was translated.
+    const rename = root.ShaderViz && root.ShaderViz.rename ? root.ShaderViz.rename : name => name;
+    state.deckA = rename(state.deckA); state.deckB = rename(state.deckB);
     const stems = object(raw.stems);
     state.stems = ['drums', 'bass', 'melody'].every(key => typeof stems[key] === 'boolean')
       ? { drums: stems.drums, bass: stems.bass, melody: stems.melody } : { drums: true, bass: true, melody: true };
@@ -49,9 +52,10 @@
     if (![0, 4, 8, 16, 32].includes(state.autoBars)) state.autoBars = 8;
     state.random = !!state.random; state.locked = !!state.locked;
     const scenes = Array.isArray(raw.scenes) ? raw.scenes : previous.scenes || [];
-    state.scenes = Array.from({ length: 8 }, (_, i) => scenes[i] && typeof scenes[i] === 'object' ? scenes[i] : null);
+    state.scenes = Array.from({ length: 8 }, (_, i) => scenes[i] && typeof scenes[i] === 'object'
+      ? { ...scenes[i], deckA: rename(scenes[i].deckA), deckB: rename(scenes[i].deckB) } : null);
     if (!['all', 'milk', 'viz', 'favs'].includes(state.pool)) state.pool = 'all';
-    state.favs = Array.isArray(state.favs) ? state.favs.filter(name => typeof name === 'string').slice(0, 200) : [];
+    state.favs = Array.isArray(state.favs) ? state.favs.filter(name => typeof name === 'string').map(rename).slice(0, 200) : [];
     const tag = { ...object(previous.tag), ...object(raw.tag) };
     // Enabled modes this version does not know stay in the state for pages that do.
     state.tag = Object.fromEntries([...tagModes, ...Object.keys(tag).filter(key => tag[key] === true)].map(key => [key, tag[key] === true]));
@@ -111,7 +115,7 @@
       this.scale = Number.isFinite(scale) && scale > 0 ? Math.min(scale, 1) : 1;
       this.ratio = Math.min(root.devicePixelRatio || 1, 2);
       const butterchurn = root.butterchurn && (root.butterchurn.default || root.butterchurn);
-      if (!butterchurn || !this.names.length) throw new Error('Butterchurn oder Presets fehlen.');
+      if (!butterchurn || !this.names.length) throw new Error('Butterchurn or presets are missing.');
       this.decks = ['A', 'B'].map(letter => {
         const source = document.createElement('canvas');
         source.className = 'deck-canvas'; source.hidden = true; canvas.parentNode.insertBefore(source, canvas);
@@ -184,7 +188,7 @@
         if (this.vizNames.includes(selected)) {
           if (!deck.viz) {
             deck.viz = root.ShaderViz.create();
-            if (!deck.viz) throw new Error('Shader-Engine nicht verfügbar.');
+            if (!deck.viz) throw new Error('Shader engine not available.');
             deck.viz.resize(deck.canvas.width, deck.canvas.height);
           }
           deck.type = selected;

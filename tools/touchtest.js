@@ -11,10 +11,10 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   const display = await (await browser.newContext({ viewport: { width: 1280, height: 720 } })).newPage();
   display.on('pageerror', e => errors.push('display: ' + e.message));
   await display.goto(url + '/?scale=0.5'); await wait(1500);
-  await display.evaluate(() => { vj.applyState({ ...vj.state, autoBars: 0, quant: 'off', deckA: '◆ Spektrum', xfade: 0, stems: { drums: true, bass: true, melody: true }, img: [] }); vj.sendState(); });
+  await display.evaluate(() => { vj.applyState({ ...vj.state, autoBars: 0, quant: 'off', deckA: '◆ Spectrum', xfade: 0, stems: { drums: true, bass: true, melody: true }, img: [] }); vj.sendState(); });
   const ua = 'Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
   const result = {};
-  for (const [name, width, height] of [['quer', 1180, 820], ['hoch', 820, 1180]]) {
+  for (const [name, width, height] of [['landscape', 1180, 820], ['portrait', 820, 1180]]) {
     const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 2, hasTouch: true, isMobile: true, userAgent: ua });
     const page = await context.newPage(); const r = result[name] = {};
     page.on('pageerror', e => errors.push(name + ': ' + e.message));
@@ -37,7 +37,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     for (let i = 0; i < 3; i++) { await wait(350); r.meters.push(await page.evaluate(() => ['drums', 'bass', 'melody'].map(s => Math.round(document.getElementById('m-' + s).getBoundingClientRect().height)))); }
     await page.screenshot({ path: `${out}/meter-${name}.png`, clip: { x: 0, y: 0, width, height: 60 } });
 
-    // Audio sources: tap = toggle, long press = solo, "Alle" = all on.
+    // Audio sources: tap = toggle, long press = solo, "All" = all on.
     await page.touchscreen.tap(...Object.values(await box('[data-stem="drums"]')).slice(0, 2)); await wait(300);
     r.tapDrums = await dstate(() => vj.state.stems);
     await hold('[data-stem="bass"]', 800); await wait(300);
@@ -53,7 +53,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
       const sel = `#img-shots .shot-tile:nth-child(3) [data-r="${routine}"]`;
       r.shots[routine] = await hold(sel, 180, async () => {
         const mid = await dstate(() => { const l = vj.layers(0.001, performance.now())[2], s = vj.layerNow[2].shot; return { routine: s && s.routine, held: !!vj.imgHeld[2], o: +l.o.toFixed(2), s: +l.s.toFixed(2), r: +l.r.toFixed(2) }; });
-        if (name === 'quer') await display.screenshot({ path: `${out}/display-shot-${routine}.png` });
+        if (name === 'landscape') await display.screenshot({ path: `${out}/display-shot-${routine}.png` });
         return { size: await box(sel).then(b => [Math.round(b.w), Math.round(b.h)]), pressed: await page.locator(sel).evaluate(e => e.classList.contains('is-pressed')), mid };
       });
       await wait(1100);
@@ -71,7 +71,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     r.pinch = await dstate(() => ({ s: +vj.state.img[1].s.toFixed(2), r: +vj.state.img[1].r.toFixed(2) }));
     await touch('touchStart', [st]); await wait(40); for (let i = 1; i <= 5; i++) { await touch('touchMove', [{ x: st.x + i * 12, y: st.y - i * 6 }]); await wait(30); } await touch('touchEnd', []); await wait(400);
     r.drag = await dstate(() => ({ x: +vj.state.img[1].x.toFixed(2), y: +vj.state.img[1].y.toFixed(2) }));
-    if (name === 'quer') await display.screenshot({ path: `${out}/display-image.png` });
+    if (name === 'landscape') await display.screenshot({ path: `${out}/display-image.png` });
 
     // XY pad 1 (rotation / zoom, spring) and an effect fader with a finger.
     await page.locator('#perf-pad-0').scrollIntoViewIfNeeded(); const pad = await box('#perf-pad-0');

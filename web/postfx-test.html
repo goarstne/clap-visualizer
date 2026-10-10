@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -53,18 +53,18 @@
 </head>
 <body>
   <h1>PostFX Test</h1>
-  <div id="no-gl">WebGL2 nicht verfügbar.</div>
+  <div id="no-gl">WebGL2 is not available.</div>
 
   <div class="wrap">
     <div class="stage">
       <canvas id="out" width="480" height="360"></canvas>
       <div class="srcs">
         <div>
-          <div class="label">Quelle A (Farbbalken)</div>
+          <div class="label">Source A (colour bars)</div>
           <canvas id="srcA" width="480" height="360"></canvas>
         </div>
         <div>
-          <div class="label">Quelle B (Formen)</div>
+          <div class="label">Source B (shapes)</div>
           <canvas id="srcB" width="480" height="360"></canvas>
         </div>
       </div>
@@ -74,7 +74,7 @@
       <div id="sliders"></div>
       <div>
         <button id="selftest-btn">Selftest</button>
-        <button id="reset-btn">Standard</button>
+        <button id="reset-btn">Defaults</button>
       </div>
     </div>
   </div>
@@ -250,7 +250,7 @@
         canvas.width = w; canvas.height = h;
         var fx2 = window.PostFX ? window.PostFX.create(canvas) : null;
         if (!fx2) {
-          report('WebGL2 verfügbar', false);
+          report("WebGL2 available", false);
           return;
         }
         fx2.resize(w, h);
@@ -297,11 +297,11 @@
         }
 
         var TOL = 4;
-        check('Standardwerte == Quelle A', {}, Adata, TOL);
-        check('mix=1 == Quelle B', { mix: 1 }, Bdata, TOL);
-        check('black=1 == Schwarz', { black: 1 }, solidData(w, h, 0, 0, 0), TOL);
-        check('flash=1 == Weiss', { flash: 1 }, solidData(w, h, 255, 255, 255), TOL);
-        check('invert=1 == invertierte Quelle A', { invert: 1 }, invertData(Adata), TOL);
+        check('defaults == source A', {}, Adata, TOL);
+        check('mix=1 == source B', { mix: 1 }, Bdata, TOL);
+        check('black=1 == black', { black: 1 }, solidData(w, h, 0, 0, 0), TOL);
+        check('flash=1 == white', { flash: 1 }, solidData(w, h, 255, 255, 255), TOL);
+        check('invert=1 == inverted source A', { invert: 1 }, invertData(Adata), TOL);
 
         fx2.destroy();
       }

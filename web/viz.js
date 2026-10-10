@@ -130,7 +130,7 @@ vec2 view() {
 `;
 
   const TYPES = {
-    Spektrum: `void main() {
+    Spectrum: `void main() {
   vec2 p = view();
   float x = abs(p.x) / (aspect() * 0.5), y = abs(p.y) * 2.0, n = 40.0;
   float id = floor(x * n), fx = fract(x * n), h = spec((id + 0.5) / n) * 0.9;
@@ -141,7 +141,7 @@ vec2 view() {
   col += vec3(0.02, 0.03, 0.07) * (1.0 - min(y, 1.0));
   outColor = vec4(col, 1.0);
 }`,
-    Oszilloskop: `void main() {
+    Oscilloscope: `void main() {
   vec2 p = view();
   float x = p.x / aspect() + 0.5, edge = smoothstep(0.0, 0.06, x) * smoothstep(0.0, 0.06, 1.0 - x);
   vec3 col = vec3(0.01, 0.02, 0.04);
@@ -152,7 +152,7 @@ vec2 view() {
   }
   outColor = vec4(col, 1.0);
 }`,
-    Kreis: `void main() {
+    Circle: `void main() {
   vec2 p = view();
   float r = length(p), a = atan(p.x, p.y), x = abs(a) / PI, n = 56.0;
   float id = floor(x * n), fx = fract(x * n), base = 0.17 + 0.07 * uBass, h = spec((id + 0.5) / n) * 0.3;
@@ -181,7 +181,7 @@ vec2 view() {
   vec3 col = pal(v * 0.25 + uTime * 0.03 + uMid * 0.5) * (0.55 + 0.45 * cos(v * 3.0 + uTreb * 5.0));
   outColor = vec4(col * (0.6 + uLevel), 1.0);
 }`,
-    Sterne: `void main() {
+    Stars: `void main() {
   vec2 p = view();
   vec3 col = vec3(0.0, 0.0, 0.02);
   for (int i = 0; i < 5; i++) {
@@ -194,7 +194,7 @@ vec2 view() {
   }
   outColor = vec4(col, 1.0);
 }`,
-    Gitter: `void main() {
+    Grid: `void main() {
   vec2 p = view();
   float y = p.y - 0.04;
   vec3 col;
@@ -216,6 +216,9 @@ vec2 view() {
   };
 
   const names = Object.keys(TYPES).map(name => PREFIX + name);
+  // Names from before the interface was translated; saved projects and scenes may still hold them.
+  const legacy = { Spektrum: 'Spectrum', Oszilloskop: 'Oscilloscope', Kreis: 'Circle', Sterne: 'Stars', Gitter: 'Grid' };
+  const rename = name => typeof name === 'string' && name.startsWith(PREFIX) && legacy[name.slice(PREFIX.length)] ? PREFIX + legacy[name.slice(PREFIX.length)] : name;
   const UNIFORMS = ['uAudio', 'uRes', 'uXf', 'uTime', 'uAngle', 'uBass', 'uMid', 'uTreb', 'uLevel'];
 
   // One instance per deck: own canvas and WebGL2 context, programs compiled on first use.
@@ -285,5 +288,5 @@ vec2 view() {
     };
   }
 
-  return { names, analyze, splitStems, create };
+  return { names, rename, analyze, splitStems, create };
 });

@@ -21,6 +21,6 @@ for (const [name, file, from, to] of JSON.parse(process.argv[3])) {
   console.log(name);
   for (const k of keys) {
     const a = fill[k].slice().sort((x, y) => x - y);
-    console.log(`  ${k.padEnd(6)} Anteil ${(100 * energy[k] / total).toFixed(0).padStart(3)} %  Füllung: Median ${(100 * pct(a, 0.5)).toFixed(0)} %, 10.-90. Perzentil ${(100 * pct(a, 0.1)).toFixed(0)}-${(100 * pct(a, 0.9)).toFixed(0)} %, voll ${(100 * a.filter(v => v >= 0.999).length / a.length).toFixed(0)} % der Zeit`);
+    console.log(`  ${k.padEnd(6)} share ${(100 * energy[k] / total).toFixed(0).padStart(3)} %  fill: median ${(100 * pct(a, 0.5)).toFixed(0)} %, 10th-90th percentile ${(100 * pct(a, 0.1)).toFixed(0)}-${(100 * pct(a, 0.9)).toFixed(0)} %, voll ${(100 * a.filter(v => v >= 0.999).length / a.length).toFixed(0)} % der Zeit`);
   }
 }

@@ -153,7 +153,7 @@ if (tags.render(now, state.tag, pulse, clock)) params.tag = tags.canvas; // 1280
 params.tagBlend = 0; // 1 add, 2 difference, 3 melt
 ```
 
-`ShaderViz.names` contains seven `◆ ` presets: Spektrum, Oszilloskop, Kreis, Tunnel, Plasma, Sterne, Gitter. A 1024-sample FFT provides a 512×2 texture (log spectrum 30 Hz..16 kHz, waveform). Camera controls use zoom/rotation/warp/displacement. dt is already speed-scaled.
+`ShaderViz.names` contains seven `◆ ` presets: Spectrum, Oscilloscope, Circle, Tunnel, Plasma, Stars, Grid. German names from older projects are mapped on load. A 1024-sample FFT provides a 512×2 texture (log spectrum 30 Hz..16 kHz, waveform). Camera controls use zoom/rotation/warp/displacement. dt is already speed-scaled.
 
 PostFX params: `mix`, effect/color values, `invert`/`flash`/`black` (0..1), five `layers`, three touch points `{x,y,a}`, `time` seconds. Pipeline: touch distortion → mirror/kaleidoscope → A/B mix → normal images → graffiti tags (`tag`, a canvas with alpha, uploaded each frame while shown) → RGB split → color → trails → top images → touch light → flash → blackout. Defaults reproduce A; srcB may be null.
 

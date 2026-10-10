@@ -1,11 +1,14 @@
 // Records the demo video: display and remote on one page (tools/demo/demo.html), remote driven by touch input.
-// Usage: PW=<dir with node_modules/playwright> node tools/demo/record.js <web dir> <music.f32> <out dir>
+// Usage: PW=<dir with node_modules/playwright> node tools/demo/record.js <web dir> <music.f32> <out dir> [tour|tags]
+//   tour (default) walks through the whole controller; tags records the graffiti wall and also saves
+//   tags-wall.jpg (the drawn wall) and tags.jpg (the tag on the display).
 //   <web dir>: copy of web/ plus demo.html and a pictures/ folder that is safe to publish (see demo/CREDITS.md)
 //   <music.f32>: output of tools/demo/music.js. Prints JSON with the video path and the audio offset for ffmpeg.
 const assert = require('assert');
 const { chromium } = require(process.env.PW + '/node_modules/playwright');
 const { spawn } = require('child_process'), fs = require('fs'), path = require('path');
-const [webDir, musicFile, outDir] = process.argv.slice(2).map(p => path.resolve(p)), port = 18780, root = path.join(__dirname, '..', '..');
+const [webDir, musicFile, outDir] = process.argv.slice(2, 5).map(p => path.resolve(p)), port = 18780, root = path.join(__dirname, '..', '..');
+const scenario = process.argv[5] || 'tour';
 
 (async () => {
   const stateFile = path.join(outDir, 'state.json'); fs.rmSync(stateFile, { force: true });
@@ -58,24 +61,90 @@ const [webDir, musicFile, outDir] = process.argv.slice(2).map(p => path.resolve(
   };
   const line = (x0, y0, x1, y1) => t => [x0 + (x1 - x0) * t, y0 + (y1 - y0) * t];
   const circle = (r, turns = 1, cx = 0.5, cy = 0.5) => t => [cx + r * Math.sin(t * turns * 2 * Math.PI) * Math.min(1, t * 6), cy - r * 0.9 * (Math.cos(t * turns * 2 * Math.PI) - 1) * Math.min(1, t * 6) / 2 - r * 0.45];
+  const log = { fps: [] };
+  if (scenario === 'tags') {
+  // Follows a polyline at constant speed; points are [fx, fy] inside the element.
+  const poly = points => {
+    const lengths = points.slice(1).map((p, k) => Math.hypot(p[0] - points[k][0], p[1] - points[k][1])), total = lengths.reduce((a, b) => a + b, 0);
+    return t => {
+      let rest = t * total, k = 0;
+      while (k < lengths.length - 1 && rest > lengths[k]) rest -= lengths[k++];
+      const f = lengths[k] ? Math.min(1, rest / lengths[k]) : 0;
+      return [points[k][0] + (points[k + 1][0] - points[k][0]) * f, points[k][1] + (points[k + 1][1] - points[k][1]) * f];
+    };
+  };
+  const arc = (cx, cy, rx, ry, from, to, n = 16) => Array.from({ length: n + 1 }, (_, k) => {
+    const a = (from + (to - from) * k / n) * Math.PI / 180; return [cx + rx * Math.cos(a), cy - ry * Math.sin(a)];
+  });
+  const fxButton = n => `#tag-fx button:nth-child(${n})`, swatch = n => `.tag-swatch:nth-child(${n})`;
+  const WRITE = 1, BURST = 2, WIPE = 3, PULSE = 4, DRIPS = 5, NEON = 6, GLITCH = 7, RAINBOW = 8, ZOOM = 9, ROTATION = 10, DRIFT = 11, WAVE = 12, TRAIL = 13, LIGHT = 14, NEGATIVE = 15, MELT = 16;
+  const tap = async (n, ms) => { await press(fxButton(n)); await wait(ms); };
+  const names = ['Canvas switch', 'Write a tag', 'Looks', 'Movement', 'Melt into the picture', 'Replay & wipe'];
+  await page.evaluate(n => setSteps(n), names);
+  const caption = (i, title, text) => page.evaluate(([i, title, text]) => caption(i, title, text), [i, title, text]);
+  await display.evaluate(() => { vj.applyState({ ...vj.state, deckA: '◆ Plasma', deckB: '◆ Plasma' }); vj.sendState(); });
+
+  await caption(-1, 'Graffiti tags', 'Draw on the tablet and your tag becomes part of the visuals. This demo runs the real plugin in the test host; the picture is a public-domain example.');
+  await press('#img-slots .img-slot:nth-child(1)'); await wait(500);
+  await press('#btn-i-fill'); await wait(300); await press('#img-modes button:nth-child(3)'); await wait(2600);
+
+  await caption(0, 'Canvas switch', 'One switch turns the controller into a wall with the 16:9 shape of the display.');
+  await press('#sw-canvas'); await wait(2200);
+
+  await caption(1, 'Write a tag', 'Finger strokes with eight colours and three widths. Several fingers draw at once. Tag done sends it to the display.');
+  await press(swatch(2), 150, 250);
+  await drag('#tag-canvas', [poly(arc(0.2, 0.5, 0.075, 0.24, 50, 310))], 1100);
+  await press(swatch(6), 150, 250);
+  await drag('#tag-canvas', [poly([[0.34, 0.26], [0.34, 0.74], [0.45, 0.74]])], 800);
+  await press(swatch(3), 150, 250);
+  await drag('#tag-canvas', [poly([[0.5, 0.74], [0.575, 0.26], [0.65, 0.74]])], 900);
+  await drag('#tag-canvas', [poly([[0.535, 0.56], [0.615, 0.56]])], 350);
+  await press(swatch(5), 150, 250);
+  await drag('#tag-canvas', [poly([[0.72, 0.74], [0.72, 0.26], ...arc(0.72, 0.385, 0.09, 0.125, 90, -90)])], 1100);
+  await press(swatch(1), 120, 200); await press('.tag-size:nth-child(1)', 120, 200);
+  await drag('#tag-canvas', [poly([[0.14, 0.84], [0.82, 0.84]]), poly([[0.18, 0.9], [0.86, 0.9]])], 900, 500);
+  await page.screenshot({ path: path.join(outDir, 'tags-wall.jpg'), type: 'jpeg', quality: 88 });
+  await press('#tag-send'); await wait(3200); log.fps.push(await fps());
+
+  await caption(2, 'Looks', 'Neon, rainbow, a pulse on the host beat, running paint and glitch. Burst scatters the tag and puts it back together.');
+  await tap(NEON, 2400); await tap(RAINBOW, 2600); await tap(PULSE, 2600);
+  await page.screenshot({ path: path.join(outDir, 'tags.jpg'), type: 'jpeg', quality: 88 });
+  await tap(DRIPS, 3400); await tap(GLITCH, 2200); await tap(GLITCH, 300);
+  await tap(BURST, 1800); await tap(DRIPS, 200); await tap(RAINBOW, 200); await tap(PULSE, 400);
+
+  await caption(3, 'Movement', 'Zoom, rotation, drift and wave follow the tempo of the host. Trail leaves a fading tail behind everything that moves.');
+  await tap(ZOOM, 3000); await tap(ROTATION, 3200); await tap(DRIFT, 3000); await tap(WAVE, 2600); await tap(TRAIL, 4000);
+  log.fps.push(await fps());
+  await tap(TRAIL, 200); await tap(ROTATION, 200); await tap(ZOOM, 200); await tap(NEON, 400);
+
+  await caption(4, 'Melt into the picture', 'Light adds the tag to the picture, negative inverts what lies beneath, melt bends and tints the visuals instead of covering them.');
+  await tap(LIGHT, 3000); await tap(NEGATIVE, 3000); await tap(MELT, 4200); await tap(MELT, 300);
+
+  await caption(5, 'Replay & wipe', 'Write draws every tag again. Wipe clears the wall. All three one-shots can wait for the next beat or bar.');
+  await tap(WAVE, 200); await tap(DRIFT, 300);
+  await tap(WRITE, 3000); await tap(WIPE, 1600);
+
+  await caption(6, 'Runs locally', 'Plugin-served pages on your LAN. Original synthesized music. Public-domain images from Wikimedia Commons. CLAP Visualizer for Linux ARM64.');
+  await press('#sw-canvas'); await wait(3500);
+
+  } else {
   const names = ['Visual types', 'Audio bands', 'Images & stage', 'Image shots', 'XY pads', 'Momentary effects', 'Effect faders', 'Touch light', 'Decks & presets', 'Scenes'];
   await page.evaluate(n => setSteps(n), names);
   const caption = (i, title, text) => page.evaluate(([i, title, text]) => caption(i, title, text), [i, title, text]);
   const viz = name => `.viz-btn[data-name="◆ ${name}"]`, mom = n => `#mom-grid .btn-mom:nth-child(${n})`, shot = (n, r) => `#img-shots .shot-tile:nth-child(${n}) [data-r="${r}"]`;
-  const log = { fps: [] };
 
   await caption(-1, 'Live visuals from your DAW', 'A CLAP effect streams audio and transport to your browser. Display left, iPad controller right. This demo runs the real plugin in the test host.');
   await wait(5500); log.fps.push(await fps());
 
   await caption(0, 'Visual types', 'Seven shader types alongside bundled MilkDrop presets. Tap to crossfade into a new look.');
-  for (const [name, ms] of [['Tunnel', 2600], ['Gitter', 2800], ['Kreis', 2600], ['Spektrum', 2200]]) { await press(viz(name)); await wait(ms); }
+  for (const [name, ms] of [['Tunnel', 2600], ['Grid', 2800], ['Circle', 2600], ['Spectrum', 2200]]) { await press(viz(name)); await wait(ms); }
 
   await caption(1, 'Audio bands', 'Tap drums, bass or melody to toggle; hold to solo. Live level meters. Frequency and transient filtering, not instrument separation.');
   for (const stem of ['drums', 'bass', 'melody']) { await press(`[data-stem="${stem}"]`, 800); await wait(3000); }
   await press('#stem-all'); await wait(1500);
 
   await caption(2, 'Images & stage', 'Five image layers. Drag with one finger; pinch and rotate with two. Blend modes, tiles, hue and wobble.');
-  await press(viz('Sterne')); await wait(600);
+  await press(viz('Stars')); await wait(600);
   await press('#img-slots .img-slot:nth-child(1)'); await wait(1400);
   await drag('#img-stage', [line(0.5, 0.5, 0.7, 0.35)], 1000);
   await drag('#img-stage', [line(0.62, 0.35, 0.5, 0.2), line(0.78, 0.35, 0.92, 0.55)], 1500, 900);
@@ -119,17 +188,18 @@ const [webDir, musicFile, outDir] = process.argv.slice(2).map(p => path.resolve(
 
   await caption(9, 'Scenes', 'Eight scenes store decks, effects and image settings. Hold to save; tap to recall, optionally on the beat.');
   await press('#scenes-grid .sc-slot:nth-child(1)', 800); await wait(900);
-  await press(viz('Gitter')); await wait(2200);
+  await press(viz('Grid')); await wait(2200);
   await press('#scenes-grid .sc-slot:nth-child(1)'); await wait(2800);
 
   await caption(10, 'Runs locally', 'Plugin-served pages on your LAN. Original synthesized music. Public-domain images from Wikimedia Commons. CLAP Visualizer for Linux ARM64.');
   await wait(4500);
 
+  }
   log.state = await display.evaluate(() => ({ images: vj.images, pictures: vj.pictures }));
   await cdp.send('Page.stopScreencast'); if (last) { encoder.stdin.write(last); written++; }
   encoder.stdin.end(); await new Promise(done => encoder.on('exit', done));
   await context.close(); await browser.close(); host.kill('SIGINT');
   assert.deepStrictEqual(errors, [], 'browser errors during recording');
-  assert(written > rate * 60, 'incomplete demo recording');
+  assert(written > rate * (scenario === 'tags' ? 40 : 60), 'incomplete demo recording');
   console.log(JSON.stringify({ video: videoFile, audioOffset: (videoAt - audioAt) / 1000, seconds: written / rate, capturedFrames: frames, picturesRequested: [...pictures].sort(), errors, ...log }, null, 1));
 })().catch(e => { console.error('FAILED', e); process.exit(1); });

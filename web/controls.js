@@ -186,7 +186,7 @@
   /**
    * XY Pad
    * Controls 2 bipolar or unipolar parameters simultaneously.
-   * Optional spring-back (rückfedernd) on release.
+   * Optional spring-back on release.
    */
   class XYPad {
     constructor(container, options = {}) {
@@ -201,7 +201,7 @@
       this.defaultY = typeof options.defaultY === 'number' ? options.defaultY : 0;
       this.y = typeof options.y === 'number' ? options.y : this.defaultY;
 
-      this.spring = options.spring !== false; // default true (rückfedernd)
+      this.spring = options.spring !== false; // default true
       this.labelX = options.labelX || 'X';
       this.labelY = options.labelY || 'Y';
 

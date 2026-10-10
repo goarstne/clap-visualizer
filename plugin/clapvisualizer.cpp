@@ -217,9 +217,9 @@ struct Plugin {
                 bool link=!guiRows[i].url.empty(), title=i==0;
                 if (i==1) {
                     int shown=port>0 ? port : port<0 ? -port : configuredPort();
-                    text=port>0 ? "Server läuft auf Port "+std::to_string(shown)+" – Link anklicken öffnet den Browser"
-                       : port<0 ? "Server nicht gestartet: Port "+std::to_string(shown)+" ist belegt"
-                       : "Server startet, sobald das Plugin aktiv ist";
+                    text=port>0 ? "Server running on port "+std::to_string(shown)+" – click a link to open the browser"
+                       : port<0 ? "Server not started: port "+std::to_string(shown)+" is in use"
+                       : "The server starts once the plugin is active";
                 }
                 cairo_select_font_face(cr,"sans-serif",CAIRO_FONT_SLANT_NORMAL,title ? CAIRO_FONT_WEIGHT_BOLD : CAIRO_FONT_WEIGHT_NORMAL);
                 cairo_set_font_size(cr,title ? 17 : link ? 14 : 12);
@@ -471,7 +471,7 @@ struct Plugin {
 };
 Plugin &self(const clap_plugin_t *p) { return *static_cast<Plugin *>(p->plugin_data); }
 const char *features[]={CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,CLAP_PLUGIN_FEATURE_ANALYZER,CLAP_PLUGIN_FEATURE_STEREO,nullptr};
-const clap_plugin_descriptor_t descriptor={CLAP_VERSION,"org.vstvisualizer.visualizer","CLAP Visualizer","CLAP Visualizer","","","","1.0.0","Stereo passthrough with browser visualization",features};
+const clap_plugin_descriptor_t descriptor={CLAP_VERSION,"org.vstvisualizer.visualizer","CLAP Visualizer","CLAP Visualizer","","","","1.1.0","Stereo passthrough with browser visualization",features};
 bool init(const clap_plugin_t *p) {
     auto &s=self(p);
     try {

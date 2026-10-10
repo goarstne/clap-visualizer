@@ -10,7 +10,7 @@
 
 An audio-reactive VJ playground for REAPER: a lightweight native CLAP effect streams audio and transport to a browser, with a touch controller on your tablet. Built on Linux ARM64 with Omarchy, C++, WebGL2 and Butterchurn.
 
-[**Watch the demo ↗**](https://github.com/goarstne/clap-visualizer/releases/download/v1.0.0/clap-visualizer-demo.mp4) · [**Download & releases**](https://github.com/goarstne/clap-visualizer/releases) · [**Control protocol**](docs/CONTROL.md)
+[**Watch the demo ↗**](https://github.com/goarstne/clap-visualizer/releases/download/v1.1.0/clap-visualizer-demo.mp4) · [**Graffiti tags demo ↗**](https://github.com/goarstne/clap-visualizer/releases/download/v1.1.0/clap-visualizer-tags-demo.mp4) · [**Download & releases**](https://github.com/goarstne/clap-visualizer/releases) · [**Control protocol**](docs/CONTROL.md)
 
 ![iPad controller mockup using the real web interface](docs/ipad-control.png)
 
@@ -27,6 +27,25 @@ An audio-reactive VJ playground for REAPER: a lightweight native CLAP effect str
 - **Recall a look:** eight scene slots, beat-linked effects and visual state saved with the REAPER project. Favorites and pad assignments stay in the browser.
 - **Keep audio intact:** stereo float/double passthrough; visualization and networking run outside the audio callback.
 - **Run locally:** plugin-served display and controller over HTTP/WebSocket, with bundled browser libraries and no cloud account.
+
+## Graffiti tags
+
+Flip the **Canvas** switch on the controller and the dashboard becomes a wall in the 16:9 shape of the display. Draw with one or several fingers, pick from eight colours and three widths, undo a stroke or clear the wall. **Tag done** sends the tag to the display, where it is mixed into the picture before colour, RGB split and trails and follows mirror and kaleidoscope, so it runs through the effects instead of sitting on top. Up to six tags stay on the wall.
+
+![The wall with a finished tag, ready to send](docs/graffiti-wall.jpg)
+
+Sixteen buttons above the wall shape what the tags do:
+
+| Group | Buttons |
+|---|---|
+| One-shots, optionally on the next beat or bar | **Write** replays the strokes, **Burst** scatters and reassembles them, **Wipe** clears the wall |
+| Looks | **Pulse** on the host beat, **Drips** of running paint, **Neon**, **Glitch**, **Rainbow** |
+| Movement in the tempo of the host | **Zoom**, **Rotation**, **Drift**, **Wave**, and **Trail** for a fading tail |
+| Melting into the picture | **Light** adds the tag, **Negative** inverts what lies beneath, **Melt** bends and tints the visuals |
+
+![The tag on the display with neon, rainbow and pulse](docs/graffiti-tags.jpg)
+
+The looks and movements combine freely and are saved with the REAPER project; the tags themselves are not stored. [Watch the 90-second graffiti demo ↗](https://github.com/goarstne/clap-visualizer/releases/download/v1.1.0/clap-visualizer-tags-demo.mp4)
 
 ## Setup: Linux ARM64, REAPER and Omarchy
 
@@ -55,7 +74,7 @@ The native plugin is Linux-only and uses an X11/XCB window. On an Omarchy Waylan
 
 5. Click the **Display** link in the plugin window, or open `http://localhost:8765/` in a WebGL2-capable browser on your computer. Use fullscreen on a second monitor or projector. On the iPad, join the same LAN and open `http://YOUR-COMPUTER-IP:8765/remote.html` in Safari. The plugin window lists LAN addresses. Landscape is the main performance layout; portrait uses two columns.
 
-The iPad controls the browser display; it does not load the native plugin. The mockup above shows the actual interface in an iPad-sized Chromium viewport inside an illustrated tablet frame. UI labels currently use German; documentation and demo captions are English.
+The iPad controls the browser display; it does not load the native plugin. The mockup above shows the actual interface in an iPad-sized Chromium viewport inside an illustrated tablet frame.
 
 ### Your own pictures
 
@@ -96,7 +115,7 @@ VSTVIS_WEB_DIR="$PWD/web" tools/fakehost 0 build/clapvisualizer.clap
 
 `make test` covers native audio passthrough, state persistence, HTTP path handling, WebSocket framing and relay, browser-side analysis/state logic, and the clickable native window. [`tools/touchtest.js`](tools/touchtest.js) additionally exercises touch controls in landscape and portrait Chromium emulation; it needs a local Playwright installation. Real iPad Safari and other host/OS combinations are not certified by those tests.
 
-The [demo](https://github.com/goarstne/clap-visualizer/releases/tag/v1.0.0) uses the real plugin in the test host, an original synthesized track, touch automation and public-domain images. It demonstrates the browser workflow rather than a screen recording of REAPER. See [demo recording instructions](docs/DEMO.md).
+The [demos](https://github.com/goarstne/clap-visualizer/releases/tag/v1.1.0) use the real plugin in the test host, an original synthesized track, touch automation and public-domain images. They demonstrate the browser workflow rather than a screen recording of REAPER. See [demo recording instructions](docs/DEMO.md).
 
 ## License
 

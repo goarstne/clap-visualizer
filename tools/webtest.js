@@ -166,3 +166,10 @@ assert(tag.drips.length >= 2 && tag.path > 1360);
 // A flood of points is cut off instead of stalling the display.
 assert.strictEqual(parse([{ p: Array(20000).fill(5) }]).strokes[0].count, 4000);
 console.log('Graffiti tags: state modes and stroke parsing OK');
+
+// Shader types saved under their former German names still load.
+assert.strictEqual(viz.rename('◆ Sterne'), '◆ Stars');
+assert.strictEqual(viz.rename('Sterne'), 'Sterne');
+const renamed = normalize({ v: 2, deckA: '◆ Gitter', favs: ['◆ Kreis', 'x'], scenes: [{ deckA: '◆ Spektrum', deckB: 'b' }] }, {}, viz.names);
+assert(renamed.deckA === '◆ Grid' && renamed.favs[0] === '◆ Circle' && renamed.scenes[0].deckA === '◆ Spectrum' && renamed.scenes[0].deckB === 'b');
+console.log('Legacy shader names: mapped to the English ones OK');

@@ -1,6 +1,6 @@
-# Recording the demo
+# Recording the demos
 
-The release video runs the real CLAP plugin in `tools/fakehost` with an original synthesized 120 BPM track. It shows the browser display and touch-operated controller with English captions. The interface itself currently uses German labels.
+The release videos run the real CLAP plugin in `tools/fakehost` with an original synthesized 120 BPM track. They show the browser display and touch-operated controller with English captions: a tour of the whole controller and a shorter one of the graffiti wall.
 
 Requirements: build dependencies, Node.js, Python 3, FFmpeg, Chromium at `/usr/bin/chromium`, and an existing Playwright installation. Set `PW` to a directory containing `node_modules/playwright`. Recording uses an isolated browser context.
 
@@ -29,6 +29,8 @@ node tools/demo/music.js "$DEMO_WORK/music.f32" 180
 node tools/demo/record.js "$DEMO_WORK/web" "$DEMO_WORK/music.f32" "$DEMO_WORK/out" > "$DEMO_WORK/out/result.json"
 ```
 
+For the graffiti demo, append `tags` to the `record.js` command (120 seconds of music are enough). It writes the tag `CLAP` on the wall, sends it and steps through the sixteen tag buttons. It also saves `tags-wall.jpg` and `tags.jpg`, the sources of [`graffiti-wall.jpg`](graffiti-wall.jpg) and [`graffiti-tags.jpg`](graffiti-tags.jpg).
+
 The recorder prints measured `audioOffset`, `seconds`, browser errors, requested images and frame-rate samples. Mux the synthesized audio at that offset (use the numeric value from `result.json`):
 
 ```bash
@@ -38,7 +40,7 @@ ffmpeg -i "$DEMO_WORK/out/video.mp4" -ss AUDIO_OFFSET_SECONDS \
   -movflags +faststart "$DEMO_WORK/clap-visualizer-demo.mp4"
 ```
 
-The final MP4 is a GitHub release asset and is excluded from Git. Check the entire requested-image list against `demo/pictures/index.json` and review the video before publishing. Image sources and licenses: [CREDITS.md](../demo/CREDITS.md).
+The final MP4s are GitHub release assets and are excluded from Git. Check the entire requested-image list against `demo/pictures/index.json` and review the video before publishing. Image sources and licenses: [CREDITS.md](../demo/CREDITS.md).
 
 For the iPad mockup, serve the same sanitized web folder with `VSTVIS_WEB_DIR` and load `/mockup.html`; capture a 1560×1120 viewport with Playwright. Its iframe is the actual controller at 1180×820, inside a CSS tablet frame. The checked-in render is [`ipad-control.png`](ipad-control.png).
 
