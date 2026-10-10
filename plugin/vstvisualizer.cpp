@@ -14,9 +14,15 @@
 #include <thread>
 #include <vector>
 #include <arpa/inet.h>
+#include <cairo/cairo-xcb.h>
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <ifaddrs.h>
+#include <net/if.h>
 #include <poll.h>
+#include <spawn.h>
+#include <sys/wait.h>
+#include <xcb/xcb.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -118,6 +124,35 @@ std::string number(double value) {
     return {text,result.ptr};
 }
 using Clock=std::chrono::steady_clock;
+int configuredPort() {
+    if (const char *env=std::getenv("VSTVIS_PORT")) { char *end=nullptr; long n=std::strtol(env,&end,10); if (*env && !*end && n>0 && n<=65535) return n; std::fprintf(stderr,"VST Visualizer: invalid VSTVIS_PORT; using 8765\n"); }
+    return 8765;
+}
+// One line of the plugin window; rows with a url are clickable links.
+struct Row { std::string text, url; };
+constexpr int GuiWidth=520, GuiLine=26, GuiPad=16;
+std::vector<Row> guiLayout(int port) {
+    std::string p=":"+std::to_string(port);
+    std::vector<Row> rows{{"VST Visualizer",""},{"",""},{"Dieser Rechner",""},
+        {"Display: http://localhost"+p+"/","http://localhost"+p+"/"},
+        {"Fernbedienung: http://localhost"+p+"/remote.html","http://localhost"+p+"/remote.html"}};
+    ifaddrs *list=nullptr;
+    if (getifaddrs(&list)) return rows;
+    for (ifaddrs *i=list; i && rows.size()<17; i=i->ifa_next) {
+        if (!i->ifa_addr || i->ifa_addr->sa_family!=AF_INET || !(i->ifa_flags&IFF_UP) || (i->ifa_flags&IFF_LOOPBACK)) continue;
+        std::string name=i->ifa_name;
+        // Container bridges are not reachable from a tablet.
+        if (name.rfind("docker",0)==0 || name.rfind("br-",0)==0 || name.rfind("veth",0)==0 || name.rfind("virbr",0)==0) continue;
+        char ip[INET_ADDRSTRLEN];
+        if (!inet_ntop(AF_INET,&reinterpret_cast<sockaddr_in *>(i->ifa_addr)->sin_addr,ip,sizeof(ip))) continue;
+        std::string base=std::string("http://")+ip+p;
+        rows.push_back({"Im Netzwerk ("+name+")",""});
+        rows.push_back({"Display: "+base+"/",base+"/"});
+        rows.push_back({"Fernbedienung (Tablet): "+base+"/remote.html",base+"/remote.html"});
+    }
+    freeifaddrs(list);
+    return rows;
+}
 struct Client {
     int fd=-1, file=-1;
     bool ws=false, display=false, closing=false, dead=false;
@@ -134,13 +169,88 @@ struct Plugin {
     alignas(64) std::atomic<uint64_t> read{0};
     std::atomic<double> bpm{0}, beat{0}, sampleRate{48000};
     std::atomic<uint32_t> signature{(4u<<16)|4}, sequence{0};
-    std::atomic<bool> playing{false}, stop{false}, dirty{false};
-    std::thread worker;
+    std::atomic<bool> playing{false}, stop{false}, dirty{false}, guiStop{false};
+    std::atomic<int> listenPort{0}; // 0 not started, <0 bind failed, else bound port
+    std::thread worker, guiThread;
+    std::vector<Row> guiRows;
+    uint32_t guiParent=0;
     std::mutex stateMutex;
     std::string state, webRoot;
     uint64_t stateVersion=0;
     explicit Plugin(const clap_host_t *h):host(h) {}
-    ~Plugin() { stop=true; if (worker.joinable()) worker.join(); }
+    ~Plugin() { closeGui(); stop=true; if (worker.joinable()) worker.join(); }
+    void closeGui() { guiStop=true; if (guiThread.joinable()) guiThread.join(); guiStop=false; }
+    int guiHeight() const { return 2*GuiPad+int(guiRows.size())*GuiLine; }
+    void openUrl(const std::string &url) {
+        // setsid -f detaches the browser from the host and exits at once, so waitpid cannot block.
+        const char *argv[]={"setsid","-f","xdg-open",url.c_str(),nullptr};
+        pid_t pid;
+        if (posix_spawnp(&pid,"setsid",nullptr,nullptr,const_cast<char *const *>(argv),environ)==0) waitpid(pid,nullptr,0);
+        else std::fprintf(stderr,"VST Visualizer: cannot open %s\n",url.c_str());
+    }
+    // Runs on its own thread with its own X connection; xcb reports errors as events instead of exiting the host.
+    void gui() {
+        xcb_connection_t *c=xcb_connect(nullptr,nullptr);
+        if (xcb_connection_has_error(c)) { xcb_disconnect(c); return; }
+        const int width=GuiWidth, height=guiHeight();
+        xcb_window_t window=xcb_generate_id(c);
+        uint32_t mask=XCB_EVENT_MASK_EXPOSURE|XCB_EVENT_MASK_BUTTON_PRESS;
+        xcb_create_window(c,XCB_COPY_FROM_PARENT,window,guiParent,0,0,width,height,0,XCB_WINDOW_CLASS_INPUT_OUTPUT,XCB_COPY_FROM_PARENT,XCB_CW_EVENT_MASK,&mask);
+        xcb_map_window(c,window);
+        xcb_visualtype_t *visual=nullptr;
+        if (auto *attributes=xcb_get_window_attributes_reply(c,xcb_get_window_attributes(c,window),nullptr)) {
+            for (auto screen=xcb_setup_roots_iterator(xcb_get_setup(c)); screen.rem && !visual; xcb_screen_next(&screen))
+                for (auto depth=xcb_screen_allowed_depths_iterator(screen.data); depth.rem && !visual; xcb_depth_next(&depth))
+                    for (auto v=xcb_depth_visuals_iterator(depth.data); v.rem; xcb_visualtype_next(&v))
+                        if (v.data->visual_id==attributes->visual) { visual=v.data; break; }
+            free(attributes);
+        }
+        cairo_surface_t *surface=visual ? cairo_xcb_surface_create(c,window,visual,width,height) : nullptr;
+        cairo_t *cr=surface ? cairo_create(surface) : nullptr;
+        auto draw=[&](int port) {
+            if (!cr) return;
+            cairo_set_source_rgb(cr,0.05,0.07,0.09); cairo_paint(cr);
+            for (size_t i=0;i<guiRows.size();++i) {
+                std::string text=guiRows[i].text;
+                bool link=!guiRows[i].url.empty(), title=i==0;
+                if (i==1) {
+                    int shown=port>0 ? port : port<0 ? -port : configuredPort();
+                    text=port>0 ? "Server läuft auf Port "+std::to_string(shown)+" – Link anklicken öffnet den Browser"
+                       : port<0 ? "Server nicht gestartet: Port "+std::to_string(shown)+" ist belegt"
+                       : "Server startet, sobald das Plugin aktiv ist";
+                }
+                cairo_select_font_face(cr,"sans-serif",CAIRO_FONT_SLANT_NORMAL,title ? CAIRO_FONT_WEIGHT_BOLD : CAIRO_FONT_WEIGHT_NORMAL);
+                cairo_set_font_size(cr,title ? 17 : link ? 14 : 12);
+                if (link) cairo_set_source_rgb(cr,0.22,0.74,0.97);
+                else if (title) cairo_set_source_rgb(cr,0.94,0.96,0.99);
+                else if (i==1 && port<0) cairo_set_source_rgb(cr,0.97,0.44,0.44);
+                else cairo_set_source_rgb(cr,0.55,0.58,0.62);
+                cairo_move_to(cr,GuiPad+(link ? 12 : 0),GuiPad+(i+1)*GuiLine-8);
+                cairo_show_text(cr,text.c_str());
+            }
+            cairo_surface_flush(surface); xcb_flush(c);
+        };
+        xcb_flush(c);
+        int drawn=listenPort.load(); draw(drawn);
+        pollfd fd{xcb_get_file_descriptor(c),POLLIN,0};
+        while (!guiStop.load() && !xcb_connection_has_error(c)) {
+            poll(&fd,1,200);
+            while (xcb_generic_event_t *event=xcb_poll_for_event(c)) {
+                uint8_t type=event->response_type&0x7f;
+                if (type==XCB_EXPOSE) draw(drawn);
+                if (type==XCB_BUTTON_PRESS) {
+                    auto *press=reinterpret_cast<xcb_button_press_event_t *>(event);
+                    int row=(press->event_y-GuiPad)/GuiLine;
+                    if (press->detail==1 && press->event_y>=GuiPad && row<int(guiRows.size()) && !guiRows[row].url.empty()) openUrl(guiRows[row].url);
+                }
+                free(event);
+            }
+            if (int port=listenPort.load(); port!=drawn) { drawn=port; draw(drawn); }
+        }
+        if (cr) cairo_destroy(cr);
+        if (surface) { cairo_surface_finish(surface); cairo_surface_destroy(surface); }
+        xcb_destroy_window(c,window); xcb_flush(c); xcb_disconnect(c);
+    }
     void queue(Client &c, const std::string &bytes, bool audio=false) {
         if (c.dead || c.closing) return;
         if (audio && c.output.size()!=c.sent) return;
@@ -258,11 +368,11 @@ struct Plugin {
         int listener=socket(AF_INET,SOCK_STREAM|SOCK_NONBLOCK|SOCK_CLOEXEC,0);
         if (listener<0) { std::perror("VST Visualizer socket"); return; }
         int reuse=1; setsockopt(listener,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));
-        int port=8765;
-        if (const char *env=std::getenv("VSTVIS_PORT")) { char *end=nullptr; long n=std::strtol(env,&end,10); if (*env && !*end && n>0 && n<=65535) port=n; else std::fprintf(stderr,"VST Visualizer: invalid VSTVIS_PORT; using 8765\n"); }
+        int port=configuredPort();
         sockaddr_in address{}; address.sin_family=AF_INET; address.sin_addr.s_addr=htonl(INADDR_ANY); address.sin_port=htons(port);
-        if (bind(listener,reinterpret_cast<sockaddr *>(&address),sizeof(address)) || listen(listener,16)) { std::perror("VST Visualizer bind/listen (audio continues)"); close(listener); return; }
+        if (bind(listener,reinterpret_cast<sockaddr *>(&address),sizeof(address)) || listen(listener,16)) { std::perror("VST Visualizer bind/listen (audio continues)"); close(listener); listenPort=-port; return; }
         std::fprintf(stderr,"VST Visualizer: listening on 0.0.0.0:%d\n",port);
+        listenPort=port;
         std::vector<Client> clients;
         uint64_t seenVersion;
         { std::lock_guard<std::mutex> guard(stateMutex); seenVersion=stateVersion; }
@@ -438,7 +548,33 @@ const clap_plugin_state_t stateExtension={
         } catch (...) {return false;}
     }
 };
+bool guiApi(const char *api,bool floating) { return !floating && api && !std::strcmp(api,CLAP_WINDOW_API_X11); }
+const clap_plugin_gui_t guiExtension={
+    [](const clap_plugin_t *,const char *api,bool floating)->bool { return guiApi(api,floating); },
+    [](const clap_plugin_t *,const char **api,bool *floating)->bool { *api=CLAP_WINDOW_API_X11; *floating=false; return true; },
+    [](const clap_plugin_t *p,const char *api,bool floating)->bool {
+        if (!guiApi(api,floating)) return false;
+        try { self(p).guiRows=guiLayout(configuredPort()); return true; } catch (...) { return false; }
+    },
+    [](const clap_plugin_t *p) { self(p).closeGui(); },
+    [](const clap_plugin_t *,double)->bool { return false; },
+    [](const clap_plugin_t *p,uint32_t *width,uint32_t *height)->bool { *width=GuiWidth; *height=self(p).guiHeight(); return true; },
+    [](const clap_plugin_t *)->bool { return false; },
+    [](const clap_plugin_t *,clap_gui_resize_hints_t *)->bool { return false; },
+    [](const clap_plugin_t *p,uint32_t *width,uint32_t *height)->bool { *width=GuiWidth; *height=self(p).guiHeight(); return true; },
+    [](const clap_plugin_t *,uint32_t,uint32_t)->bool { return true; },
+    [](const clap_plugin_t *p,const clap_window_t *window)->bool {
+        auto &s=self(p); if (!window || !window->x11 || s.guiThread.joinable()) return false;
+        s.guiParent=uint32_t(window->x11);
+        try { s.guiThread=std::thread([&s]{s.gui();}); return true; } catch (...) { return false; }
+    },
+    [](const clap_plugin_t *,const clap_window_t *)->bool { return false; },
+    [](const clap_plugin_t *,const char *) {},
+    [](const clap_plugin_t *)->bool { return true; },
+    [](const clap_plugin_t *)->bool { return true; }
+};
 const void *extension(const clap_plugin_t *,const char *id) {
+    if (!std::strcmp(id,CLAP_EXT_GUI)) return &guiExtension;
     if (!std::strcmp(id,CLAP_EXT_AUDIO_PORTS)) return &ports;
     if (!std::strcmp(id,CLAP_EXT_STATE)) return &stateExtension;
     return nullptr;

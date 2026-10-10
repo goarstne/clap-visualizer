@@ -4,3 +4,4 @@ node_modules/
 *.clap
 .playwright-mcp/
 tools/fakehost
+tools/guitest
