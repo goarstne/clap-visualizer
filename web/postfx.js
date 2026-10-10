@@ -7,6 +7,10 @@
  * shift, colour (hue/sat/bright/contrast/invert), trails (feedback), flash and
  * blackout. Trails uses two ping-pong framebuffers and a blit pass; with
  * trails = 0 no framebuffer is used and rendering goes straight to the canvas.
+ *
+ * Up to five image layers (setImage + params.layers) are composited either
+ * inside the chain (they get mirrored, shifted and coloured with the visuals)
+ * or on top of it. Touch points bend the picture and add a glow.
  */
 
 (function (root, factory) {
@@ -52,6 +56,17 @@
     'uniform float uRgb;\n' +
     'uniform float uFlash;\n' +
     'uniform float uBlack;\n' +
+    'uniform float uAspect;\n' +
+    'uniform float uTime;\n' +
+    'uniform sampler2D uImg0;\n' +
+    'uniform sampler2D uImg1;\n' +
+    'uniform sampler2D uImg2;\n' +
+    'uniform sampler2D uImg3;\n' +
+    'uniform sampler2D uImg4;\n' +
+    'uniform vec4 uLayA[5];\n' +  // centre x, centre y (uv), width, height (screen heights)
+    'uniform vec4 uLayB[5];\n' +  // rotation, opacity, blend mode, 1 = on top of the chain
+    'uniform vec4 uLayC[5];\n' +  // tiles, hue shift (degrees), wobble
+    'uniform vec3 uTouch[3];\n' + // x, y (uv), strength
     'in vec2 vUv;\n' +
     'out vec4 outColor;\n' +
     'const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);\n' +
@@ -64,8 +79,42 @@
     '  vec3 k = vec3(0.57735);\n' +
     '  return c * cs + cross(k, c) * sn + k * dot(k, c) * (1.0 - cs);\n' +
     '}\n' +
+    'vec3 layer(vec3 c, sampler2D img, vec4 a, vec4 b, vec4 e, vec2 uv) {\n' +
+    '  if (b.y <= 0.0) return c;\n' +
+    '  vec2 q = (uv - a.xy) * vec2(uAspect, 1.0);\n' +
+    '  float cs = cos(b.x);\n' +
+    '  float sn = sin(b.x);\n' +
+    '  q = vec2(q.x * cs + q.y * sn, q.y * cs - q.x * sn) / a.zw + vec2(0.5);\n' +
+    '  if (q.x < 0.0 || q.x > 1.0 || q.y < 0.0 || q.y > 1.0) return c;\n' +
+    '  q += e.z * 0.04 * vec2(sin(q.y * 12.0 + uTime * 3.0), cos(q.x * 12.0 + uTime * 2.6));\n' +
+    '  if (e.x > 1.5 || e.z > 0.0) q = fract(q * e.x);\n' +
+    '  vec3 t = texture(img, q).rgb;\n' +
+    '  if (e.y > 0.5) t = hueRotate(t, e.y);\n' +
+    '  if (b.z < 0.5) return mix(c, t, b.y);\n' +                             // normal
+    '  if (b.z < 1.5) return c + t * b.y;\n' +                                // add
+    '  if (b.z < 2.5) return mix(c, vec3(1.0) - (vec3(1.0) - c) * (vec3(1.0) - t), b.y);\n' + // screen
+    '  if (b.z < 3.5) return mix(c, c * t, b.y);\n' +                         // multiply
+    '  if (b.z < 4.5) return mix(c, abs(c - t), b.y);\n' +                    // difference
+    '  return mix(c, t, b.y * smoothstep(0.08, 0.45, dot(t, LUMA)));\n' +     // luma key
+    '}\n' +
+    'vec3 layers(vec3 c, vec2 uv, float top) {\n' +
+    '  if (uLayB[0].w == top) c = layer(c, uImg0, uLayA[0], uLayB[0], uLayC[0], uv);\n' +
+    '  if (uLayB[1].w == top) c = layer(c, uImg1, uLayA[1], uLayB[1], uLayC[1], uv);\n' +
+    '  if (uLayB[2].w == top) c = layer(c, uImg2, uLayA[2], uLayB[2], uLayC[2], uv);\n' +
+    '  if (uLayB[3].w == top) c = layer(c, uImg3, uLayA[3], uLayB[3], uLayC[3], uv);\n' +
+    '  if (uLayB[4].w == top) c = layer(c, uImg4, uLayA[4], uLayB[4], uLayC[4], uv);\n' +
+    '  return c;\n' +
+    '}\n' +
     'vec2 coord(vec2 uv) {\n' +
     '  vec2 c = uv;\n' +
+    '  for (int i = 0; i < 3; i++) {\n' +
+    '    vec3 t = uTouch[i];\n' +
+    '    if (t.z <= 0.0) continue;\n' +
+    '    vec2 d = c - t.xy;\n' +
+    '    float r = length(d * vec2(uAspect, 1.0));\n' +
+    '    c -= d * 0.5 * t.z * exp(-r * r * 30.0);\n' +
+    '    c += d / max(r, 0.0001) * sin(r * 45.0 - uTime * 9.0) * 0.012 * t.z * exp(-r * 5.0);\n' +
+    '  }\n' +
     '  float n = floor(uKaleido + 0.5);\n' +
     '  if (n >= 2.0) {\n' +
     '    vec2 p = c - vec2(0.5);\n' +
@@ -84,7 +133,7 @@
     'vec3 sampleAB(vec2 uv) {\n' +
     '  vec3 a = texture(uSrcA, uv).rgb;\n' +
     '  vec3 b = texture(uSrcB, uv).rgb;\n' +
-    '  return mix(a, b, uMix);\n' +
+    '  return layers(mix(a, b, uMix), uv, 0.0);\n' +
     '}\n' +
     'void main() {\n' +
     '  vec2 tc = coord(vUv);\n' +
@@ -105,6 +154,12 @@
     '  c = (c - vec3(0.5)) * uContrast + vec3(0.5);\n' +
     '  c = mix(c, vec3(1.0) - c, uInvert);\n' +
     '  if (uTrails > 0.0) c = mix(c, texture(uPrev, vec2(vUv.x, 1.0 - vUv.y)).rgb, uTrails);\n' +
+    '  c = layers(c, vUv, 1.0);\n' +
+    '  for (int i = 0; i < 3; i++) {\n' +
+    '    vec3 t = uTouch[i];\n' +
+    '    float r = length((vUv - t.xy) * vec2(uAspect, 1.0));\n' +
+    '    c += hueRotate(vec3(1.0, 0.45, 0.15), uHue + float(i) * 120.0) * t.z * exp(-r * r * 90.0);\n' +
+    '  }\n' +
     '  c = mix(c, vec3(1.0), uFlash);\n' +
     '  c = mix(c, vec3(0.0), uBlack);\n' +
     '  outColor = vec4(c, 1.0);\n' +
@@ -129,7 +184,9 @@
 
   var UNIFORMS = ['uSrcA', 'uSrcB', 'uPrev', 'uMix', 'uHue', 'uSat', 'uBright',
     'uContrast', 'uInvert', 'uKaleido', 'uMirror', 'uTrails', 'uRgb', 'uFlash',
-    'uBlack'];
+    'uBlack', 'uAspect', 'uTime', 'uLayA', 'uLayB', 'uLayC', 'uTouch'];
+
+  var LAYERS = 5, TOUCHES = 3, IMAGE_UNIT = 3;
 
   function clamp01(x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
   function clamp(x, lo, hi) { return x < lo ? lo : (x > hi ? hi : x); }
@@ -183,6 +240,13 @@
     this.srcATex = null;
     this.srcBTex = null;
     this.dummyTex = null;
+    this.imgTex = [];
+    this.imgSource = [];
+    this.imgAspect = [];
+    this.layA = new Float32Array(LAYERS * 4);
+    this.layB = new Float32Array(LAYERS * 4);
+    this.layC = new Float32Array(LAYERS * 4);
+    this.touch = new Float32Array(TOUCHES * 3);
     this.fb = [null, null];
     this.fbTex = [null, null];
     this.fbSize = [0, 0];
@@ -202,6 +266,7 @@
       self.fbTex = [null, null];
       self.fbSize = [0, 0];
       self.init();
+      for (var i = 0; i < LAYERS; i++) self.setImage(i, self.imgSource[i]);
       if (self.width > 0) self.resize(self.width, self.height);
     };
     canvas.addEventListener('webglcontextlost', this.onLost, false);
@@ -257,6 +322,16 @@
     gl.uniform1i(u.uPrev, 2);
     this.u = u;
 
+    // Image textures stay bound to their own units; nothing else uses units >= 3.
+    for (var k = 0; k < LAYERS; k++) {
+      gl.activeTexture(gl.TEXTURE0 + IMAGE_UNIT + k);
+      this.imgTex[k] = makeTexture(gl);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
+        new Uint8Array([0, 0, 0, 255]));
+      gl.uniform1i(gl.getUniformLocation(this.program, 'uImg' + k), IMAGE_UNIT + k);
+    }
+    gl.activeTexture(gl.TEXTURE0);
+
     gl.useProgram(this.blitProgram);
     this.uBlit.uTex = gl.getUniformLocation(this.blitProgram, 'uTex');
     gl.uniform1i(this.uBlit.uTex, 0);
@@ -272,6 +347,20 @@
     if (this.fb[0] && (this.fbSize[0] !== w || this.fbSize[1] !== h)) {
       this.allocFb(w, h);
     }
+  };
+
+  // source: loaded HTMLImageElement / canvas, or null to clear the layer.
+  PostFX.prototype.setImage = function (index, source) {
+    if (this.destroyed || index < 0 || index >= LAYERS) return;
+    this.imgSource[index] = source || null;
+    this.imgAspect[index] = source
+      ? (source.naturalWidth || source.width || 1) / (source.naturalHeight || source.height || 1) : 0;
+    if (this.lost || !source) return;
+    var gl = this.gl;
+    gl.activeTexture(gl.TEXTURE0 + IMAGE_UNIT + index);
+    gl.bindTexture(gl.TEXTURE_2D, this.imgTex[index]);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, source);
+    gl.activeTexture(gl.TEXTURE0);
   };
 
   PostFX.prototype.freeFb = function () {
@@ -357,6 +446,30 @@
     gl.uniform1f(u.uRgb, rgb);
     gl.uniform1f(u.uFlash, flash);
     gl.uniform1f(u.uBlack, black);
+    gl.uniform1f(u.uAspect, w / h);
+    gl.uniform1f(u.uTime, val(p, 'time', 0));
+
+    // s = 1 fits the whole image on screen; x, y in -1..1 with y up.
+    var layers = p.layers || [], touch = p.touch || [];
+    for (var i = 0; i < LAYERS; i++) {
+      var l = layers[i], aspect = this.imgAspect[i];
+      var shown = l && aspect > 0 && l.o > 0;
+      var height = shown ? Math.max(0.001, l.s * Math.min(1, w / h / aspect)) : 1;
+      this.layA.set([shown ? 0.5 + l.x * 0.5 : 0, shown ? 0.5 - l.y * 0.5 : 0,
+        shown ? height * aspect : 1, height], i * 4);
+      this.layB.set([shown ? l.r : 0, shown ? clamp01(l.o) : 0, shown ? l.m : 0,
+        shown && l.top ? 1 : 0], i * 4);
+      this.layC.set([shown ? Math.max(1, Math.round(l.tile || 1)) : 1, shown ? l.hue || 0 : 0,
+        shown ? l.wob || 0 : 0, 0], i * 4);
+    }
+    for (var j = 0; j < TOUCHES; j++) {
+      var t = touch[j];
+      this.touch.set(t && t.a > 0 ? [0.5 + t.x * 0.5, 0.5 - t.y * 0.5, clamp01(t.a)] : [0, 0, 0], j * 3);
+    }
+    gl.uniform4fv(u.uLayA, this.layA);
+    gl.uniform4fv(u.uLayB, this.layB);
+    gl.uniform4fv(u.uLayC, this.layC);
+    gl.uniform3fv(u.uTouch, this.touch);
 
     if (trails > 0) {
       if (!this.fb[0] || this.fbSize[0] !== w || this.fbSize[1] !== h) {
@@ -408,6 +521,7 @@
       if (this.srcATex) gl.deleteTexture(this.srcATex);
       if (this.srcBTex) gl.deleteTexture(this.srcBTex);
       if (this.dummyTex) gl.deleteTexture(this.dummyTex);
+      for (var i = 0; i < this.imgTex.length; i++) gl.deleteTexture(this.imgTex[i]);
       if (this.vao) gl.deleteVertexArray(this.vao);
       if (this.program) gl.deleteProgram(this.program);
       if (this.blitProgram) gl.deleteProgram(this.blitProgram);

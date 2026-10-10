@@ -9,7 +9,15 @@
     bass: [0, 3, 1], mid: [0, 3, 1], treb: [0, 3, 1]
   };
   const periods = { '1/2': 0.5, '1': 1, '2': 2, '4': 4, '8': 8 };
-  const moments = ['flash', 'black', 'invert', 'freeze', 'kick', 'mirror', 'kaleido', 'strobe'];
+  const moments = ['flash', 'black', 'invert', 'freeze', 'kick', 'mirror', 'kaleido', 'strobe',
+    'zoom', 'spin', 'rgb', 'trails', 'hue', 'mono', 'shake', 'turbo'];
+  const imgRanges = {
+    x: [-1.5, 1.5, 0], y: [-1.5, 1.5, 0], s: [0.05, 4, 0.6], r: [-31.4, 31.4, 0],
+    o: [0, 1, 1], pulse: [0, 1, 0], spin: [-2, 2, 0], tile: [1, 6, 1], hue: [0, 360, 0], wob: [0, 1, 0]
+  };
+  const imgDefault = () => ({
+    src: '', on: false, x: 0, y: 0, s: 0.6, r: 0, o: 1, m: 0, pulse: 0, spin: 0, top: false, tile: 1, hue: 0, wob: 0
+  });
   const object = value => value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   const clamp = (value, min, max, fallback) => Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
   const defaults = () => Object.fromEntries(Object.entries(ranges).map(([key, range]) => [key, range[2]]));
@@ -30,6 +38,9 @@
     // A complete incoming sync map can also remove a previously enabled coupling.
     if (raw.sync && typeof raw.sync === 'object') state.sync = { ...object(raw.sync) };
     state.type = 'state'; state.v = 2;
+    const stems = object(raw.stems);
+    state.stems = ['drums', 'bass', 'melody'].every(key => typeof stems[key] === 'boolean')
+      ? { drums: stems.drums, bass: stems.bass, melody: stems.melody } : { drums: true, bass: true, melody: true };
     if (!raw.v && typeof raw.preset === 'string') state.deckA = raw.preset;
     state.xfade = clamp(state.xfade, 0, 1, 0);
     state.blend = clamp(state.blend, 0, 10, 2);
@@ -38,6 +49,17 @@
     state.random = !!state.random; state.locked = !!state.locked;
     const scenes = Array.isArray(raw.scenes) ? raw.scenes : previous.scenes || [];
     state.scenes = Array.from({ length: 8 }, (_, i) => scenes[i] && typeof scenes[i] === 'object' ? scenes[i] : null);
+    if (!['all', 'milk', 'viz', 'favs'].includes(state.pool)) state.pool = 'all';
+    state.favs = Array.isArray(state.favs) ? state.favs.filter(name => typeof name === 'string').slice(0, 200) : [];
+    const img = Array.isArray(raw.img) ? raw.img : [], oldImg = Array.isArray(previous.img) ? previous.img : [];
+    state.img = Array.from({ length: 5 }, (_, i) => {
+      const layer = { ...imgDefault(), ...object(oldImg[i]), ...object(img[i]) };
+      for (const [key, range] of Object.entries(imgRanges)) layer[key] = clamp(layer[key], range[0], range[1], range[2]);
+      layer.src = typeof layer.src === 'string' ? layer.src : '';
+      layer.on = !!layer.on; layer.top = !!layer.top;
+      layer.m = [0, 1, 2, 3, 4, 5].includes(layer.m) ? layer.m : 0;
+      return layer;
+    });
     return state;
   }
 
@@ -55,7 +77,10 @@
         const source = library && (library.default || library);
         if (source && source.getPresets) Object.assign(this.presets, source.getPresets());
       }
-      this.names = Object.keys(this.presets);
+      this.fx = root.PostFX && root.PostFX.create ? root.PostFX.create(canvas) : null;
+      // Shader types need the PostFX canvas as their only visible output.
+      this.vizNames = this.fx && root.ShaderViz ? root.ShaderViz.names : [];
+      this.names = [...Object.keys(this.presets), ...this.vizNames];
       this.state = normalize({}, {}, this.names);
       this.target = { ...this.state.fx }; this.current = { ...this.target };
       this.mix = this.targetMix = this.state.xfade;
@@ -67,13 +92,18 @@
         timeByteArrayR: new Uint8Array(1024)
       };
       this.pending = new Map(); this.thumbs = new Set(); this.held = {};
+      this.pictures = []; this.images = ['', '', '', '', '']; this.imgHeld = [];
+      this.layerNow = this.state.img.map(layer => ({ ...layer, gain: 0, angle: 0, shot: null }));
+      this.touch = [0, 1, 2].map(() => ({ x: 0, y: 0, on: false, a: 0 }));
+      this.spectrum = null; this.bands = { drums: 0, bass: 0, melody: 0 };
+      this.stemState = [{}, {}];
+      this.lastBands = -Infinity; this.audioFrameAt = performance.now();
       this.flashes = []; this.flashAt = this.kickAt = -Infinity; this.strobeStep = null;
       this.transition = null; this.lastFrame = performance.now(); this.lastPending = 0;
       this.lastAutoBar = null; this.lastSwitch = this.lastFrame; this.hasState = false;
       const scale = Number(new URLSearchParams(root.location.search).get('scale'));
       this.scale = Number.isFinite(scale) && scale > 0 ? Math.min(scale, 1) : 1;
       this.ratio = Math.min(root.devicePixelRatio || 1, 2);
-      this.fx = root.PostFX && root.PostFX.create ? root.PostFX.create(canvas) : null;
       const butterchurn = root.butterchurn && (root.butterchurn.default || root.butterchurn);
       if (!butterchurn || !this.names.length) throw new Error('Butterchurn oder Presets fehlen.');
       this.decks = ['A', 'B'].map(letter => {
@@ -83,11 +113,14 @@
           width: Math.max(1, Math.round(root.innerWidth * this.scale)),
           height: Math.max(1, Math.round(root.innerHeight * this.scale)), pixelRatio: this.ratio
         });
-        return { letter, canvas: source, visualizer, name: '', visibleSince: null };
+        return { letter, canvas: source, visualizer, name: '', visibleSince: null, viz: null, type: null };
       });
       this.frameFX = { ...this.current };
       this.load(0, this.state.deckA, 0); this.load(1, this.state.deckB, 0);
       this.useFallback(); this.resize();
+      root.fetch('pictures/index.json').then(response => response.ok ? response.json() : [])
+        .then(list => { this.pictures = Array.isArray(list) ? list.filter(name => typeof name === 'string') : []; this.syncImages(); })
+        .catch(() => {});
       this.onResize = () => this.resize(); root.addEventListener('resize', this.onResize);
       this.socket = new root.VisualizerSocket({
         role: 'display', onState: state => { this.hasState = true; this.applyState(state); },
@@ -119,6 +152,7 @@
       for (const deck of this.decks) {
         deck.canvas.width = pixelsW; deck.canvas.height = pixelsH;
         deck.visualizer.setRendererSize(width, height, { pixelRatio: this.ratio });
+        if (deck.viz) deck.viz.resize(pixelsW, pixelsH);
       }
       if (this.fx) this.fx.resize(pixelsW, pixelsH);
     }
@@ -138,11 +172,21 @@
 
     load(index, name, blend = this.state.blend) {
       const deck = this.decks[index];
-      const selected = Object.prototype.hasOwnProperty.call(this.presets, name) ? name : this.names[0];
+      const selected = this.names.includes(name) ? name : this.names[0];
       if (!selected) return false;
       try {
-        deck.visualizer.loadPreset(this.presets[selected], blend);
-        this.hook(deck); deck.name = selected; deck.visibleSince = null;
+        if (this.vizNames.includes(selected)) {
+          if (!deck.viz) {
+            deck.viz = root.ShaderViz.create();
+            if (!deck.viz) throw new Error('Shader-Engine nicht verfügbar.');
+            deck.viz.resize(deck.canvas.width, deck.canvas.height);
+          }
+          deck.type = selected;
+        } else {
+          deck.visualizer.loadPreset(this.presets[selected], blend);
+          this.hook(deck); deck.type = null;
+        }
+        deck.name = selected; deck.visibleSince = null;
         this.state['deck' + deck.letter] = selected;
         return true;
       } catch (error) { this.showError(error); return false; }
@@ -155,8 +199,23 @@
         if (name !== this.decks[i].name) this.load(i, name);
       }
       this.target = { ...this.state.fx }; this.targetMix = this.state.xfade;
+      this.syncImages();
       this.transition = null; this.lastSwitch = performance.now();
       this.lastAutoBar = Math.floor(this.beatNow() / this.beatsPerBar());
+    }
+
+    // Slot i shows its stored file, or by default the i-th file of pictures/index.json.
+    syncImages() {
+      this.state.img.forEach((layer, i) => {
+        const src = layer.src || this.pictures[i] || '';
+        if (src === this.images[i] || !this.fx) return;
+        this.images[i] = src;
+        if (!src) { this.fx.setImage(i, null); return; }
+        // ponytail: full-size upload, images beyond the GPU texture limit (4096+) stay blank; downscale via canvas if needed.
+        const image = new Image();
+        image.onload = () => { if (this.images[i] === src) this.fx.setImage(i, image); };
+        image.src = 'pictures/' + encodeURIComponent(src);
+      });
     }
 
     sendState() { this.socket.send({ type: 'state', ...this.state }); }
@@ -169,6 +228,8 @@
         this.initialStateTimer = setTimeout(() => { if (!this.hasState) this.sendState(); }, 600);
       } else {
         this.held = {}; this.flashAt = this.kickAt = -Infinity; this.strobeStep = null;
+        this.imgHeld = []; for (const layer of this.layerNow) layer.shot = null;
+        for (const point of this.touch) point.on = false;
         this.pending.clear(); this.transport.playing = false; this.lastAudio = -Infinity;
       }
     }
@@ -219,13 +280,34 @@
             if (key === 'strobe') this.strobeStep = Math.floor(this.beatNow(now) * 2);
           }
           this.held[key] = pressed;
+        } else if (typeof message.k === 'string' && message.k.startsWith('img.')) {
+          const [, slot, key] = message.k.split('.'), layer = this.state.img[Number(slot)];
+          if (!layer) return;
+          if (key === 'on') this.imgHeld[Number(slot)] = message.v === 1;
+          else if (key === 'shot') {
+            const current = this.layerNow[Number(slot)];
+            if (message.v === 1 && !current.shot) {
+              const routine = ['zoom', 'spin', 'flash'].includes(message.r) ? message.r : 'zoom';
+              current.shot = { routine, start: now, duration: { zoom: 350, spin: 600, flash: 500 }[routine] };
+              current.gain = 1;
+              if (routine === 'flash') this.flash(now);
+            }
+            this.imgHeld[Number(slot)] = message.v === 1;
+          }
+          else if (imgRanges[key]) layer[key] = clamp(message.v, imgRanges[key][0], imgRanges[key][1], layer[key]);
+        } else if (typeof message.k === 'string' && message.k.startsWith('tp.')) {
+          const point = this.touch[Number(message.k.slice(3))];
+          if (!point) return;
+          point.on = Array.isArray(message.v);
+          if (point.on) { point.x = clamp(message.v[0], -1, 1, 0); point.y = clamp(message.v[1], -1, 1, 0); }
         }
-      } else if (message.type === 'trig' && ['swap', 'load', 'scene', 'next', 'prev', 'random', 'title'].includes(message.k)) {
+      } else if (message.type === 'trig' && ['swap', 'load', 'scene', 'next', 'prev', 'random', 'title', 'show', 'img'].includes(message.k)) {
         const quant = message.q || this.state.quant;
+        const key = message.k === 'img' ? 'img' + message.i : message.k;
         if (quant === 'off' || !this.transport.playing || this.transport.bpm <= 0) {
-          this.pending.delete(message.k); this.execute(message, now);
+          this.pending.delete(key); this.execute(message, now);
         } else {
-          this.pending.set(message.k, {
+          this.pending.set(key, {
             message, beat: nextBoundary(this.beatNow(now), quant, this.transport.tsNum, this.transport.tsDen)
           });
         }
@@ -240,30 +322,41 @@
       if (!this.transition) this.mix = destination;
     }
 
-    choose(kind) {
-      const visible = this.decks[this.mix < 0.5 ? 0 : 1].name;
-      const index = Math.max(0, this.names.indexOf(visible));
-      if (kind === 'random' && this.names.length > 1) {
-        return this.names[(index + 1 + Math.floor(Math.random() * (this.names.length - 1))) % this.names.length];
-      }
-      return this.names[(index + (kind === 'prev' ? this.names.length - 1 : 1)) % this.names.length];
+    // Presets the automatic and next/prev/random changes may pick from.
+    pool() {
+      const kind = this.state.pool;
+      const list = kind === 'viz' ? this.vizNames
+        : kind === 'milk' ? this.names.filter(name => !this.vizNames.includes(name))
+        : kind === 'favs' ? this.state.favs.filter(name => this.names.includes(name)) : this.names;
+      return list.length ? list : this.names;
     }
 
-    change(kind, now) {
+    choose(kind) {
+      const names = this.pool(), visible = this.decks[this.mix < 0.5 ? 0 : 1].name;
+      const index = names.indexOf(visible);
+      if (kind === 'random' && names.length > 1) {
+        const others = names.filter(name => name !== visible);
+        return others[Math.floor(Math.random() * others.length)];
+      }
+      return names[(index + (kind === 'prev' ? names.length - 1 : 1) + names.length) % names.length];
+    }
+
+    // Loads the preset on the hidden deck and blends over to it.
+    show(name, now) {
       if (!this.fx) {
-        this.load(0, this.choose(kind));
+        this.load(0, name);
         this.state.xfade = this.targetMix = this.mix = 0; this.transition = null;
         return;
       }
       const hidden = this.mix < 0.5 ? 1 : 0;
-      if (this.load(hidden, this.choose(kind), 0)) this.swap(now, hidden);
+      if (this.load(hidden, name, 0)) this.swap(now, hidden);
     }
 
     execute(message, now) {
       switch (message.k) {
         case 'swap': this.swap(now); break;
         case 'load':
-          if (!['A', 'B'].includes(message.deck) || !Object.prototype.hasOwnProperty.call(this.presets, message.preset)) return;
+          if (!['A', 'B'].includes(message.deck) || !this.names.includes(message.preset)) return;
           this.load(message.deck === 'B' ? 1 : 0, message.preset); break;
         case 'scene': {
           const scene = Number.isInteger(message.i) && this.state.scenes[message.i];
@@ -272,7 +365,17 @@
           this.applyState({ ...this.state, ...scene, type: 'state', v: 2 });
           this.mix = previousMix; this.swap(now, this.state.xfade); break;
         }
-        case 'next': case 'prev': case 'random': this.change(message.k, now); break;
+        case 'next': case 'prev': case 'random': this.show(this.choose(message.k), now); break;
+        case 'show':
+          if (!this.names.includes(message.preset)) return;
+          this.show(message.preset, now); break;
+        case 'img': {
+          const layer = this.state.img[message.i];
+          if (!Number.isInteger(message.i) || !layer) return;
+          layer.on = typeof message.on === 'boolean' ? message.on : !layer.on;
+          this.sendState(); this.socket.send({ type: 'pending', k: 'img' + message.i, beats: 0 });
+          return;
+        }
         case 'title':
           if (typeof message.text !== 'string') return;
           for (const deck of this.decks) deck.visualizer.launchSongTitleAnim(message.text); break;
@@ -311,6 +414,43 @@
           ? 1 - ((beat % period + period) % period) / period : 1;
         this.frameFX[key] = ranges[key][2] + (this.current[key] - ranges[key][2]) * envelope;
       }
+      // Momentary overrides while held.
+      const fx = this.frameFX, held = this.held;
+      if (held.zoom) fx.zoom = 1;
+      if (held.spin) fx.rot = 1;
+      if (held.rgb) fx.rgb = 1;
+      if (held.trails) fx.trails = 0.9;
+      if (held.hue) fx.hue = (fx.hue + performance.now() * 0.36) % 360;
+      if (held.mono) fx.sat = 0;
+      if (held.shake) { fx.dx = Math.random() * 2 - 1; fx.dy = Math.random() * 2 - 1; }
+      if (held.turbo) fx.speed = 3;
+    }
+
+    // Smoothed image layers for this frame, in the units PostFX expects.
+    layers(dt, time = performance.now()) {
+      const amount = 1 - Math.exp(-dt / 0.06), fade = 1 - Math.exp(-dt / 0.12);
+      const bass = this.spectrum ? this.spectrum.bass : 0;
+      return this.state.img.map((layer, i) => {
+        const now = this.layerNow[i], shot = now.shot;
+        const progress = shot ? Math.max(0, Math.min(1, (time - shot.start) / shot.duration)) : 1;
+        const active = shot && progress < 1;
+        const shown = layer.on || this.imgHeld[i] || active ? 1 : 0;
+        let scale = 1, rotation = 0, opacity = 1;
+        if (active) {
+          if (shot.routine === 'zoom') scale = 1 + 0.9 * (1 - progress) ** 3;
+          if (shot.routine === 'spin') { scale = progress; rotation = 4 * Math.PI * progress; }
+          if (shot.routine === 'flash') opacity = 0.25 + 0.75 * (0.5 + 0.5 * Math.cos(progress * 6 * Math.PI));
+        } else now.shot = null;
+        for (const key of ['x', 'y', 's', 'r', 'o', 'hue', 'wob']) now[key] += (layer[key] - now[key]) * amount;
+        now.gain += (shown - now.gain) * fade;
+        if (!shown && now.gain < 0.004) now.gain = 0;
+        // spin 1 = half a turn per second; without spin the extra angle unwinds.
+        now.angle = layer.spin ? now.angle + layer.spin * dt * Math.PI : now.angle % (2 * Math.PI) * (1 - amount);
+        return {
+          x: now.x, y: now.y, s: now.s * (1 + layer.pulse * bass) * scale, r: now.r + now.angle + rotation,
+          o: now.o * now.gain * opacity, m: layer.m, top: layer.top, tile: layer.tile, hue: now.hue, wob: now.wob
+        };
+      });
     }
 
     processAudio(now) {
@@ -320,10 +460,15 @@
       const kickTime = (now - this.kickAt) / 1000;
       const kick = kickTime >= 0 && kickTime < 0.18 ? 0.85 * Math.exp(-kickTime * 25) : 0;
       const fresh = now - this.lastAudio < 250;
-      for (const [raw, processed] of [[this.rawL, this.levels.timeByteArrayL], [this.rawR, this.levels.timeByteArrayR]]) {
+      const dt = Math.max(0, (now - this.audioFrameAt) / 1000); this.audioFrameAt = now;
+      const bands = { drums: 0, bass: 0, melody: 0 };
+      for (const [raw, processed, state] of [[this.rawL, this.levels.timeByteArrayL, this.stemState[0]], [this.rawR, this.levels.timeByteArrayR, this.stemState[1]]]) {
+        const split = fresh && root.ShaderViz ? root.ShaderViz.splitStems(raw, this.state.stems, rate, state) : null;
+        for (const key of Object.keys(bands)) bands[key] = Math.max(bands[key], split ? split[key] : 0);
+        const selected = split ? split.wave : raw;
         let bass = 0, lowMid = 0;
         for (let i = 0; i < 1024; i++) {
-          const sample = fresh ? (raw[i] - 128) / 127 : 0;
+          const sample = fresh ? (selected[i] - 128) / 127 : 0;
           bass += bassAlpha * (sample - bass); lowMid += midAlpha * (sample - lowMid);
           const impulse = kick ? kick * Math.sin(2 * Math.PI * 65 * (kickTime + i / rate)) : 0;
           const value = fx.gain * (bass * fx.bass + (lowMid - bass) * fx.mid + (sample - lowMid) * fx.treb + impulse * fx.bass);
@@ -331,6 +476,11 @@
         }
       }
       for (let i = 0; i < 1024; i++) this.levels.timeByteArray[i] = (this.levels.timeByteArrayL[i] + this.levels.timeByteArrayR[i]) >> 1;
+      for (const key of Object.keys(bands)) {
+        const amount = 1 - Math.exp(-dt / (bands[key] > this.bands[key] ? 0.02 : 0.3));
+        this.bands[key] += (bands[key] - this.bands[key]) * amount;
+      }
+      if (now - this.lastBands >= 100) { this.socket.send({ type: 'bands', ...this.bands }); this.lastBands = now; }
       return this.levels;
     }
 
@@ -340,7 +490,7 @@
       if (this.thumbs.has(deck.name) || now - deck.visibleSince < 3000) return;
       if (!this.thumbCanvas) { this.thumbCanvas = document.createElement('canvas'); this.thumbCanvas.width = 96; this.thumbCanvas.height = 54; }
       try {
-        this.thumbCanvas.getContext('2d').drawImage(deck.canvas, 0, 0, 96, 54);
+        this.thumbCanvas.getContext('2d').drawImage(deck.type ? deck.viz.canvas : deck.canvas, 0, 0, 96, 54);
         let data = this.thumbCanvas.toDataURL('image/jpeg', 0.5);
         if (data.length >= 6144) data = this.thumbCanvas.toDataURL('image/jpeg', 0.3);
         if (data.length < 6144 && this.socket.send({ type: 'thumb', preset: deck.name, data })) this.thumbs.add(deck.name);
@@ -362,12 +512,19 @@
         if (step !== this.strobeStep) { this.flash(now); this.strobeStep = step; }
       }
       const options = { audioLevels: this.processAudio(now), elapsedTime: Math.max(0.000001, dt * (this.held.freeze ? 0 : this.frameFX.speed)) };
-      this.decks[0].visualizer.render(options);
+      if (root.ShaderViz) this.spectrum = root.ShaderViz.analyze(this.levels.timeByteArray, dt, this.transport.sampleRate);
+      const draw = deck => {
+        if (!deck.type) { deck.visualizer.render(options); return deck.canvas; }
+        deck.viz.render(deck.type, this.spectrum, this.frameFX, options.elapsedTime);
+        return deck.viz.canvas;
+      };
+      const sourceA = draw(this.decks[0]);
       const renderB = !!this.fx && (this.mix > 0 || !!this.transition);
-      if (renderB) this.decks[1].visualizer.render(options);
+      const sourceB = renderB ? draw(this.decks[1]) : null;
+      for (const point of this.touch) point.a += ((point.on ? 1 : 0) - point.a) * (1 - Math.exp(-dt / (point.on ? 0.05 : 0.4)));
       if (this.fx) {
-        this.fx.render(this.decks[0].canvas, renderB ? this.decks[1].canvas : null, {
-          ...this.frameFX, mix: this.mix, kaleido: this.held.kaleido ? 6 : Math.round(this.frameFX.kaleido),
+        this.fx.render(sourceA, sourceB, {
+          ...this.frameFX, mix: this.mix, layers: this.layers(dt, now), touch: this.touch, time: now / 1000 % 3600, kaleido: this.held.kaleido ? 6 : Math.round(this.frameFX.kaleido),
           mirror: this.held.mirror ? 3 : Math.round(this.frameFX.mirror),
           invert: this.held.invert ? 1 : 0, black: this.held.black ? 1 : 0,
           flash: Math.max(0, 1 - (now - this.flashAt) / 150)
@@ -381,6 +538,7 @@
       root.cancelAnimationFrame(this.animation); clearTimeout(this.initialStateTimer);
       root.removeEventListener('resize', this.onResize); this.socket.destroy();
       if (this.fx) this.fx.destroy();
+      for (const deck of this.decks) if (deck.viz) deck.viz.destroy();
     }
   }
 

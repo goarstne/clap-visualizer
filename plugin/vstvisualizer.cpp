@@ -114,6 +114,8 @@ const char *mime(const std::string &path) {
     if (ext=="json") return "application/json";
     if (ext=="svg") return "image/svg+xml";
     if (ext=="png") return "image/png";
+    if (ext=="jpg" || ext=="jpeg") return "image/jpeg";
+    if (ext=="webp") return "image/webp";
     if (ext=="ico") return "image/x-icon";
     if (ext=="wasm") return "application/wasm";
     return "application/octet-stream";
@@ -248,7 +250,8 @@ struct Plugin {
             if (int port=listenPort.load(); port!=drawn) { drawn=port; draw(drawn); }
         }
         if (cr) cairo_destroy(cr);
-        if (surface) { cairo_surface_finish(surface); cairo_surface_destroy(surface); }
+        // cairo caches a device per connection pointer; finish it, or a later connection at the same address aborts.
+        if (surface) { cairo_surface_finish(surface); cairo_device_finish(cairo_surface_get_device(surface)); cairo_surface_destroy(surface); }
         xcb_destroy_window(c,window); xcb_flush(c); xcb_disconnect(c);
     }
     void queue(Client &c, const std::string &bytes, bool audio=false) {

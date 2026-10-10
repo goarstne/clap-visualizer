@@ -66,6 +66,10 @@ int main(int argc,char **argv) {
     std::printf("GUI: click opened \"%s\"\n",opened.c_str());
     assert(opened=="http://localhost:18765/");
 
+    // Reopening must work: a stale cairo device for the closed connection used to abort the host.
+    gui->hide(plugin); gui->destroy(plugin);
+    assert(gui->create(plugin,CLAP_WINDOW_API_X11,false) && gui->set_parent(plugin,&window) && gui->show(plugin));
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
     gui->hide(plugin); gui->destroy(plugin); plugin->destroy(plugin); entry->deinit();
     xcb_destroy_window(c,parent); xcb_disconnect(c);
     unlink(stub.c_str()); unlink(result.c_str()); rmdir(dir);

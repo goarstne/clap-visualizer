@@ -125,6 +125,7 @@ def main():
         (web / 'index.html').write_text('<!doctype html><title>selftest</title>')
         (web / 'remote.html').write_text('<!doctype html><title>remote</title>')
         (web / 'app.js').write_text('/* selftest */')
+        (web / 'photo.jpg').write_bytes(b'\xff\xd8\xff')
         (web / 'large.wasm').write_bytes(b'x' * 400000)
         (web / 'outside').symlink_to('/etc/passwd')
         library = tmp / 'vstvisualizer.clap'
@@ -138,6 +139,7 @@ def main():
             assert request_http(port, '/')[0] == 200
             assert request_http(port, '/remote.html')[0] == 200
             assert request_http(port, '/app.js')[1].startswith('text/javascript')
+            assert request_http(port, '/photo.jpg')[1] == 'image/jpeg'
             status, content_type, body = request_http(port, '/large.wasm')
             assert status == 200 and content_type == 'application/wasm' and len(body) == 400000
             for path in ['/../etc/passwd', '/%2e%2e/etc/passwd', '/outside', '/%00', '/missing']:

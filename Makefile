@@ -5,8 +5,10 @@ CXXFLAGS += -std=c++17 -Wall -Wextra -Wpedantic -pthread
 LDLIBS += -pthread -ldl
 CLAP_DIR ?= $(HOME)/.clap
 HEADERS := $(shell find third_party/clap/include -name '*.h')
+# Folder with the images for the five image buttons (jpg, jpeg, png, webp).
+PICTURES ?= Pictues
 
-.PHONY: all test install clean
+.PHONY: all test install clean pictures
 all: build/vstvisualizer.clap tools/fakehost tools/guitest
 
 build/vstvisualizer.clap: plugin/vstvisualizer.cpp $(HEADERS)
@@ -21,9 +23,16 @@ tools/guitest: tools/guitest.cpp $(HEADERS)
 
 test: all
 	python3 tools/selftest.py
+	node tools/webtest.js
 	tools/guitest build/vstvisualizer.clap
 
-install: all
+# Copies the images into the web directory and writes the list the pages load.
+pictures:
+	rm -rf web/pictures && mkdir -p web/pictures
+	if [ -d "$(PICTURES)" ]; then find "$(PICTURES)" -maxdepth 1 -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) -exec cp {} web/pictures/ \; ; fi
+	python3 -c 'import json, os; names = sorted(os.listdir("web/pictures")); open("web/pictures/index.json", "w").write(json.dumps(names))'
+
+install: all pictures
 	install -d "$(CLAP_DIR)"
 	install -m 755 build/vstvisualizer.clap "$(CLAP_DIR)/vstvisualizer.clap"
 	mkdir -p "$(CLAP_DIR)/vstvisualizer.web"
