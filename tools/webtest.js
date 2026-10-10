@@ -141,3 +141,23 @@ for (const routine of ['zoom', 'spin', 'flash', 'unknown']) {
   assert.strictEqual(JSON.stringify(test.state), stored);
 }
 console.log('Web: spectrum peak, shader type list, state clamping, stems, audio bypass/bands, shot routines OK');
+
+// Graffiti tags: effect modes are plain booleans, and tag strokes from the wire are clamped.
+assert.deepStrictEqual(normalize({ v: 2 }).tag, { pulse: false, drip: false, neon: false, glitch: false, rainbow: false });
+assert.deepStrictEqual(normalize({ v: 2, tag: { neon: true, drip: 1, bogus: true } }).tag, { pulse: false, drip: false, neon: true, glitch: false, rainbow: false });
+assert.strictEqual(normalize({ v: 2 }, normalize({ v: 2, tag: { pulse: true } })).tag.pulse, true);
+require(path.join(web, 'tags.js'));
+const { parse } = global.window.VJTags;
+assert.strictEqual(parse(null), null);
+assert.strictEqual(parse([{ p: [1] }, { c: '#fff' }]), null);
+const tag = parse([{ c: '#ffe600', w: 0.02, p: [0, 0, 500, 0, 500, 1000] }, { c: 'url(x)', w: 99, p: [-50, 2000, 'x', 400] }]);
+assert.strictEqual(tag.strokes.length, 2);
+assert.deepStrictEqual(Array.from(tag.strokes[0].points), [0, 0, 0.5, 0, 0.5, 1]);
+// 0.5 of the 1280 px width, then the full 720 px height.
+assert.deepStrictEqual(Array.from(tag.strokes[0].length), [0, 640, 1360]);
+assert.deepStrictEqual(Array.from(tag.strokes[1].points), [0, 1, 0, 0.4000000059604645]);
+assert(tag.strokes[1].color === '#ffffff' && Math.abs(tag.strokes[1].width - 0.08 * 720) < 1e-9);
+assert(tag.drips.length >= 2 && tag.path > 1360);
+// A flood of points is cut off instead of stalling the display.
+assert.strictEqual(parse([{ p: Array(20000).fill(5) }]).strokes[0].count, 4000);
+console.log('Graffiti tags: state modes and stroke parsing OK');

@@ -22,6 +22,7 @@ An audio-reactive VJ playground for REAPER: a lightweight native CLAP effect str
 - **Explore MilkDrop and shaders:** bundled Butterchurn presets plus seven visual types: spectrum, oscilloscope, circle, tunnel, plasma, stars and grid. Search presets, filter groups and save favorites.
 - **Perform with touch:** four assignable XY pads, spring return, effect faders and 16 momentary effects, including blackout, invert, kaleidoscope, RGB split, freeze and strobe.
 - **Paint with images:** five image layers with drag, pinch, rotation, opacity, six blend modes, tiling, hue, wobble and bass pulse. Trigger zoom, spin and flash shots; draw light with up to three fingers.
+- **Tag the wall:** a switch turns the controller into a 16:9 canvas. Draw graffiti tags with your finger; a finished tag is mixed into the visuals and runs through mirror, kaleidoscope, colour and trails. Eight buttons replay, burst, pulse, drip, neon, glitch, rainbow and wipe the tags.
 - **Shape the response:** drums, bass and melody selectors with level meters. This is frequency/transient filtering, not AI instrument separation.
 - **Recall a look:** eight scene slots, beat-linked effects and visual state saved with the REAPER project. Favorites and pad assignments stay in the browser.
 - **Keep audio intact:** stereo float/double passthrough; visualization and networking run outside the audio callback.

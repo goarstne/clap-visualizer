@@ -15,6 +15,7 @@
     x: [-1.5, 1.5, 0], y: [-1.5, 1.5, 0], s: [0.05, 4, 0.6], r: [-31.4, 31.4, 0],
     o: [0, 1, 1], pulse: [0, 1, 0], spin: [-2, 2, 0], tile: [1, 6, 1], hue: [0, 360, 0], wob: [0, 1, 0]
   };
+  const tagModes = ['pulse', 'drip', 'neon', 'glitch', 'rainbow'];
   const imgDefault = () => ({
     src: '', on: false, x: 0, y: 0, s: 0.6, r: 0, o: 1, m: 0, pulse: 0, spin: 0, top: false, tile: 1, hue: 0, wob: 0
   });
@@ -51,6 +52,8 @@
     state.scenes = Array.from({ length: 8 }, (_, i) => scenes[i] && typeof scenes[i] === 'object' ? scenes[i] : null);
     if (!['all', 'milk', 'viz', 'favs'].includes(state.pool)) state.pool = 'all';
     state.favs = Array.isArray(state.favs) ? state.favs.filter(name => typeof name === 'string').slice(0, 200) : [];
+    const tag = { ...object(previous.tag), ...object(raw.tag) };
+    state.tag = Object.fromEntries(tagModes.map(key => [key, tag[key] === true]));
     const img = Array.isArray(raw.img) ? raw.img : [], oldImg = Array.isArray(previous.img) ? previous.img : [];
     state.img = Array.from({ length: 5 }, (_, i) => {
       const layer = { ...imgDefault(), ...object(oldImg[i]), ...object(img[i]) };
@@ -95,6 +98,8 @@
       this.pictures = []; this.images = ['', '', '', '', '']; this.imgHeld = [];
       this.layerNow = this.state.img.map(layer => ({ ...layer, gain: 0, angle: 0, shot: null }));
       this.touch = [0, 1, 2].map(() => ({ x: 0, y: 0, on: false, a: 0 }));
+      // Graffiti tags are mixed in by PostFX, so they need its canvas.
+      this.tags = this.fx && root.VJTags ? root.VJTags.create() : null;
       this.spectrum = null; this.bands = { drums: 0, bass: 0, melody: 0 };
       this.stemState = [{}, {}];
       this.lastBands = -Infinity; this.audioFrameAt = performance.now();
@@ -301,9 +306,11 @@
           point.on = Array.isArray(message.v);
           if (point.on) { point.x = clamp(message.v[0], -1, 1, 0); point.y = clamp(message.v[1], -1, 1, 0); }
         }
-      } else if (message.type === 'trig' && ['swap', 'load', 'scene', 'next', 'prev', 'random', 'title', 'show', 'img'].includes(message.k)) {
+      } else if (message.type === 'tag') {
+        if (this.tags && this.tags.add(message.strokes, now)) this.socket.send({ type: 'tags', n: this.tags.count() });
+      } else if (message.type === 'trig' && ['swap', 'load', 'scene', 'next', 'prev', 'random', 'title', 'show', 'img', 'tag'].includes(message.k)) {
         const quant = message.q || this.state.quant;
-        const key = message.k === 'img' ? 'img' + message.i : message.k;
+        const key = message.k === 'img' ? 'img' + message.i : message.k === 'tag' ? 'tag' + message.fx : message.k;
         if (quant === 'off' || !this.transport.playing || this.transport.bpm <= 0) {
           this.pending.delete(key); this.execute(message, now);
         } else {
@@ -376,6 +383,12 @@
           this.sendState(); this.socket.send({ type: 'pending', k: 'img' + message.i, beats: 0 });
           return;
         }
+        case 'tag':
+          if (!this.tags || !this.tags.trigger(message.fx, now)) return;
+          this.socket.send({ type: 'pending', k: 'tag' + message.fx, beats: 0 });
+          // A wipe empties the wall once its fade has run.
+          if (message.fx === 'wipe') this.socket.send({ type: 'tags', n: 0 });
+          return;
         case 'title':
           if (typeof message.text !== 'string') return;
           for (const deck of this.decks) deck.visualizer.launchSongTitleAnim(message.text); break;
@@ -522,9 +535,12 @@
       const renderB = !!this.fx && (this.mix > 0 || !!this.transition);
       const sourceB = renderB ? draw(this.decks[1]) : null;
       for (const point of this.touch) point.a += ((point.on ? 1 : 0) - point.a) * (1 - Math.exp(-dt / (point.on ? 0.05 : 0.4)));
+      // Pulse follows the beat while the host plays, otherwise the bass level.
+      const pulse = this.transport.playing && this.transport.bpm > 0 ? (1 - (beat % 1 + 1) % 1) ** 2 : this.spectrum ? this.spectrum.bass : 0;
+      const tagCanvas = this.tags && this.tags.render(now, this.state.tag, pulse) ? this.tags.canvas : null;
       if (this.fx) {
         this.fx.render(sourceA, sourceB, {
-          ...this.frameFX, mix: this.mix, layers: this.layers(dt, now), touch: this.touch, time: now / 1000 % 3600, kaleido: this.held.kaleido ? 6 : Math.round(this.frameFX.kaleido),
+          ...this.frameFX, mix: this.mix, tag: tagCanvas, layers: this.layers(dt, now), touch: this.touch, time: now / 1000 % 3600, kaleido: this.held.kaleido ? 6 : Math.round(this.frameFX.kaleido),
           mirror: this.held.mirror ? 3 : Math.round(this.frameFX.mirror),
           invert: this.held.invert ? 1 : 0, black: this.held.black ? 1 : 0,
           flash: Math.max(0, 1 - (now - this.flashAt) / 150)

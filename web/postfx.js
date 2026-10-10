@@ -11,6 +11,9 @@
  * Up to five image layers (setImage + params.layers) are composited either
  * inside the chain (they get mirrored, shifted and coloured with the visuals)
  * or on top of it. Touch points bend the picture and add a glow.
+ *
+ * params.tag (a canvas with alpha, see tags.js) is mixed in right after the
+ * in-chain images, so graffiti tags run through all following effects.
  */
 
 (function (root, factory) {
@@ -67,6 +70,8 @@
     'uniform vec4 uLayB[5];\n' +  // rotation, opacity, blend mode, 1 = on top of the chain
     'uniform vec4 uLayC[5];\n' +  // tiles, hue shift (degrees), wobble
     'uniform vec3 uTouch[3];\n' + // x, y (uv), strength
+    'uniform sampler2D uTag;\n' +
+    'uniform float uTagOn;\n' +
     'in vec2 vUv;\n' +
     'out vec4 outColor;\n' +
     'const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);\n' +
@@ -133,7 +138,12 @@
     'vec3 sampleAB(vec2 uv) {\n' +
     '  vec3 a = texture(uSrcA, uv).rgb;\n' +
     '  vec3 b = texture(uSrcB, uv).rgb;\n' +
-    '  return layers(mix(a, b, uMix), uv, 0.0);\n' +
+    '  vec3 c = layers(mix(a, b, uMix), uv, 0.0);\n' +
+    '  if (uTagOn > 0.0) {\n' +
+    '    vec4 t = texture(uTag, uv);\n' +
+    '    c = mix(c, t.rgb, t.a);\n' +
+    '  }\n' +
+    '  return c;\n' +
     '}\n' +
     'void main() {\n' +
     '  vec2 tc = coord(vUv);\n' +
@@ -184,9 +194,9 @@
 
   var UNIFORMS = ['uSrcA', 'uSrcB', 'uPrev', 'uMix', 'uHue', 'uSat', 'uBright',
     'uContrast', 'uInvert', 'uKaleido', 'uMirror', 'uTrails', 'uRgb', 'uFlash',
-    'uBlack', 'uAspect', 'uTime', 'uLayA', 'uLayB', 'uLayC', 'uTouch'];
+    'uBlack', 'uAspect', 'uTime', 'uLayA', 'uLayB', 'uLayC', 'uTouch', 'uTagOn'];
 
-  var LAYERS = 5, TOUCHES = 3, IMAGE_UNIT = 3;
+  var LAYERS = 5, TOUCHES = 3, IMAGE_UNIT = 3, TAG_UNIT = IMAGE_UNIT + LAYERS;
 
   function clamp01(x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
   function clamp(x, lo, hi) { return x < lo ? lo : (x > hi ? hi : x); }
@@ -330,6 +340,11 @@
         new Uint8Array([0, 0, 0, 255]));
       gl.uniform1i(gl.getUniformLocation(this.program, 'uImg' + k), IMAGE_UNIT + k);
     }
+    gl.activeTexture(gl.TEXTURE0 + TAG_UNIT);
+    this.tagTex = makeTexture(gl);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
+      new Uint8Array([0, 0, 0, 0]));
+    gl.uniform1i(gl.getUniformLocation(this.program, 'uTag'), TAG_UNIT);
     gl.activeTexture(gl.TEXTURE0);
 
     gl.useProgram(this.blitProgram);
@@ -448,6 +463,14 @@
     gl.uniform1f(u.uBlack, black);
     gl.uniform1f(u.uAspect, w / h);
     gl.uniform1f(u.uTime, val(p, 'time', 0));
+    gl.uniform1f(u.uTagOn, p.tag ? 1 : 0);
+    if (p.tag) {
+      // The tag canvas animates, so it is uploaded every frame it is shown.
+      gl.activeTexture(gl.TEXTURE0 + TAG_UNIT);
+      gl.bindTexture(gl.TEXTURE_2D, this.tagTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, p.tag);
+      gl.activeTexture(gl.TEXTURE0);
+    }
 
     // s = 1 fits the whole image on screen; x, y in -1..1 with y up.
     var layers = p.layers || [], touch = p.touch || [];

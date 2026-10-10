@@ -191,6 +191,31 @@ main { flex: 1; padding: 6px; gap: 6px; overflow: hidden; display: grid; min-hei
 .sc-slot.has { border-color: rgba(56,189,248,0.5); background: rgba(56,189,248,0.1); }
 .sc-desc { font-size: 9px; color: var(--text-muted); font-weight: normal; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 2px; }
 
+/* GRAFFITI */
+.sw { display: flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 8px; font-size: 12px; font-weight: bold; flex-shrink: 0; }
+.sw-track { width: 34px; height: 18px; border-radius: 9px; background: #333; position: relative; transition: background 0.15s; }
+.sw-track::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: white; transition: transform 0.15s; }
+.sw.active .sw-track { background: var(--accent); }
+.sw.active .sw-track::after { transform: translateX(16px); }
+#tagview { flex: 1; min-height: 0; display: none; flex-direction: column; gap: 6px; padding: 6px; }
+body.canvas-on #tagview { display: flex; }
+body.canvas-on main { display: none; }
+.tag-fx { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; flex-shrink: 0; }
+.tag-fx button { min-height: 52px; font-size: 12px; font-weight: bold; flex-direction: column; gap: 1px; padding: 0 2px; min-width: 0; border-width: 2px; }
+.tag-fx button .sub { font-size: 9px; font-weight: normal; opacity: 0.75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.tag-tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; flex-shrink: 0; }
+.tag-tools button { min-height: 44px; padding: 0 12px; font-size: 12px; font-weight: bold; }
+.tag-group { display: flex; gap: 4px; align-items: center; }
+.tag-swatch { width: 40px; height: 40px; min-height: 40px !important; padding: 0 !important; border-radius: 50%; border: 3px solid var(--card-border); }
+.tag-swatch.active { border-color: white; box-shadow: 0 0 8px rgba(255,255,255,0.5); }
+.tag-size { width: 44px; padding: 0 !important; }
+.tag-size i { display: block; border-radius: 50%; background: white; }
+#tag-send { margin-left: auto; min-width: 150px; font-size: 14px; }
+#tag-count { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.tag-wall { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+#tag-canvas { background: #171a20 repeating-linear-gradient(0deg, transparent 0 46px, rgba(255,255,255,0.04) 46px 48px); border: 2px solid var(--card-border); border-radius: 4px; touch-action: none; display: block; }
+@media (max-width: 700px) { .tag-fx { grid-template-columns: repeat(4, minmax(0, 1fr)); } #tag-send { min-width: 110px; } }
+
 /* TOAST */
 #toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: rgba(15,23,42,0.9); border: 1px solid var(--accent); padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; opacity: 0; transition: opacity 0.2s; pointer-events: none; z-index: 1000; }
 #toast.show { opacity: 1; }
@@ -206,6 +231,7 @@ main { flex: 1; padding: 6px; gap: 6px; overflow: hidden; display: grid; min-hei
         <span id="st-bpm" style="color:var(--accent);">-- BPM</span>
         <span id="pending"></span>
       </div>
+      <button id="sw-canvas" class="sw" title="Schaltet zwischen Steuerung und Graffiti-Leinwand um"><span>🎨 Leinwand</span><span class="sw-track"></span></button>
       <div class="stems">
         <button id="stem-all" class="stem-btn active">Alle</button>
         <button class="stem-btn" data-stem="drums"><span class="stem-lbl">Drums</span><div class="stem-meter" id="m-drums"></div></button>
@@ -359,6 +385,19 @@ main { flex: 1; padding: 6px; gap: 6px; overflow: hidden; display: grid; min-hei
     </div>
   </main>
   
+  <section id="tagview">
+    <div class="tag-fx" id="tag-fx"></div>
+    <div class="tag-tools">
+      <div class="tag-group" id="tag-colors"></div>
+      <div class="tag-group" id="tag-sizes"></div>
+      <button id="tag-undo">↶ Strich zurück</button>
+      <button id="tag-clear">Leeren</button>
+      <span id="tag-count">Wand: 0 Tags</span>
+      <button id="tag-send" class="btn-swap">✔ TAG FERTIG</button>
+    </div>
+    <div class="tag-wall" id="tag-wall"><canvas id="tag-canvas" width="1280" height="720"></canvas></div>
+  </section>
+
   <div id="toast"></div>
 
   <script src="vendor/butterchurnPresets.min.js"></script>
@@ -428,7 +467,8 @@ main { flex: 1; padding: 6px; gap: 6px; overflow: hidden; display: grid; min-hei
       xfade:0, blend:2, quant:'bar', autoBars:8, random:true, locked:false,
       fx:fx, sync:{}, scenes:Array(8).fill(null), pool:'all', favs:[],
       img:Array.from({length:5}, ()=>({...IMG_DEFAULT})),
-      stems: {drums:true, bass:true, melody:true}
+      stems: {drums:true, bass:true, melody:true},
+      tag: {pulse:false, drip:false, neon:false, glitch:false, rainbow:false}
     };
   }
   let state = createDefaultState();
@@ -450,6 +490,7 @@ main { flex: 1; padding: 6px; gap: 6px; overflow: hidden; display: grid; min-hei
     out.img = def.img.map((lyr,i)=>({...lyr, ...((Array.isArray(s.img)&&s.img[i])||{})}));
     if(!s.stems || typeof s.stems !== 'object') out.stems = {...def.stems};
     else out.stems = {drums:!!s.stems.drums, bass:!!s.stems.bass, melody:!!s.stems.melody};
+    out.tag = Object.fromEntries(Object.keys(def.tag).map(k => [k, !!(s.tag && s.tag[k] === true)]));
     out.v = 2; out.type = 'state'; return out;
   }
 
@@ -529,6 +570,8 @@ main { flex: 1; padding: 6px; gap: 6px; overflow: hidden; display: grid; min-hei
         const waiting = typeof msg.beats==='number' && msg.beats>0;
         el('pending').style.display = waiting ? 'inline' : 'none';
         if(waiting) el('pending').textContent = `⏳ ${String(msg.k).toUpperCase()} in ${msg.beats.toFixed(1)}`;
+      } else if(msg.type==='tags') {
+        el('tag-count').textContent = `Wand: ${msg.n} Tag${msg.n===1?'':'s'}`;
       } else if(msg.type==='bands') {
         ['drums','bass','melody'].forEach(s => {
           const m = el('m-'+s); if(m && typeof msg[s]==='number') m.style.transform = `scaleY(${Math.min(1,Math.sqrt(Math.max(0,msg[s]))*1.15)})`;
@@ -834,7 +877,99 @@ main { flex: 1; padding: 6px; gap: 6px; overflow: hidden; display: grid; min-hei
   });
   el('btn-fx-reset').onclick = () => { FX_DEFS.forEach(d=>{state.fx[d.key]=d.def; fxFaders[d.key].setValue(d.def); fxFaderVals[d.key].textContent=fmtFx(d.key,d.def); el('fs-'+d.key).value='';}); state.sync={}; syncPads(); socket.sendState(state); showToast('FX Reset'); };
 
+  // GRAFFITI: draw a tag with the finger, send it when finished, trigger tag effects.
+  const TAG_FX = [
+    {fx:'write', l:'✍ Schreiben', s:'neu zeichnen'}, {fx:'burst', l:'💥 Explosion', s:'zerplatzt'},
+    {mode:'pulse', l:'💓 Puls', s:'im Beat'}, {mode:'drip', l:'💧 Drips', s:'Farbe läuft'},
+    {mode:'neon', l:'💡 Neon', s:'leuchtet'}, {mode:'glitch', l:'⚡ Glitch', s:'Störung'},
+    {mode:'rainbow', l:'🌈 Regenbogen', s:'Farbrausch'}, {fx:'wipe', l:'🧽 Wischen', s:'Wand leeren'}
+  ];
+  const TAG_COLORS = ['#ffffff','#ffe600','#ff2d95','#ff5a1f','#3dff6e','#19c8ff','#a855f7','#ff1f1f'];
+  const TAG_SIZES = [0.008, 0.018, 0.036];
+  const TAG_MAX_POINTS = 4000, TAG_MAX_BYTES = 60000;
+  const tagCanvas = el('tag-canvas'), tagCtx = tagCanvas.getContext('2d');
+  const tagBtns = [], tagPtrs = new Map();
+  // Right after a drawing gesture browsers may swallow the click of the next tap, so wall buttons act on pointerup.
+  const onTap = (node, action) => node.addEventListener('pointerup', e => {
+    const r = node.getBoundingClientRect();
+    if(e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) action();
+  });
+  let tagStrokes = [], tagColor = TAG_COLORS[1], tagSize = TAG_SIZES[1], tagRaf = false;
+
+  TAG_FX.forEach(d => {
+    const b = document.createElement('button'); b.innerHTML = `<span>${d.l}</span><span class="sub">${d.s}</span>`;
+    onTap(b, () => {
+      if(d.fx) { socket.send({type:'trig',k:'tag',fx:d.fx,q:state.quant}); showToast(d.l); }
+      else { state.tag[d.mode] = !state.tag[d.mode]; socket.sendState(state); renderTagUI(); }
+    });
+    el('tag-fx').appendChild(b); tagBtns.push(b);
+  });
+  TAG_COLORS.forEach(c => {
+    const b = document.createElement('button'); b.className = 'tag-swatch'; b.style.background = c; b.dataset.c = c;
+    onTap(b, () => { tagColor = c; renderTagUI(); }); el('tag-colors').appendChild(b);
+  });
+  TAG_SIZES.forEach((w, i) => {
+    const b = document.createElement('button'); b.className = 'tag-size'; b.dataset.w = w;
+    b.innerHTML = `<i style="width:${8+i*9}px;height:${8+i*9}px"></i>`;
+    onTap(b, () => { tagSize = w; renderTagUI(); }); el('tag-sizes').appendChild(b);
+  });
+  function renderTagUI() {
+    TAG_FX.forEach((d, i) => tagBtns[i].classList.toggle('active', !!d.mode && state.tag[d.mode]));
+    document.querySelectorAll('.tag-swatch').forEach(b => b.classList.toggle('active', b.dataset.c === tagColor));
+    document.querySelectorAll('.tag-size').forEach(b => b.classList.toggle('active', Number(b.dataset.w) === tagSize));
+  }
+  // The wall keeps the 16:9 shape of the display inside whatever space is left.
+  function fitTagCanvas() {
+    const r = el('tag-wall').getBoundingClientRect(), w = Math.max(0, Math.min(r.width, r.height * STAGE_ASPECT) - 4);
+    tagCanvas.style.width = w + 'px'; tagCanvas.style.height = (w / STAGE_ASPECT) + 'px';
+  }
+  function drawTag() {
+    tagRaf = false; tagCtx.clearRect(0, 0, 1280, 720); tagCtx.lineCap = tagCtx.lineJoin = 'round';
+    for(const pass of [0, 1]) for(const st of tagStrokes) {
+      tagCtx.beginPath();
+      for(let i = 0; i < st.p.length; i += 2) { const x = st.p[i]*1.28, y = st.p[i+1]*0.72; if(i) tagCtx.lineTo(x, y); else { tagCtx.moveTo(x, y); tagCtx.lineTo(x+0.01, y); } }
+      tagCtx.strokeStyle = pass ? st.c : '#000'; tagCtx.lineWidth = st.w * 720 * (pass ? 1 : 1.7); tagCtx.stroke();
+    }
+  }
+  const queueTagDraw = () => { if(!tagRaf) { tagRaf = true; requestAnimationFrame(drawTag); } };
+  const tagPoints = () => tagStrokes.reduce((n, st) => n + st.p.length / 2, 0);
+  function tagPoint(st, e) {
+    const r = tagCanvas.getBoundingClientRect();
+    const x = Math.round(limit((e.clientX - r.left) / r.width, 0, 1) * 1000), y = Math.round(limit((e.clientY - r.top) / r.height, 0, 1) * 1000);
+    const n = st.p.length;
+    if(n && Math.hypot(x - st.p[n-2], y - st.p[n-1]) < 4) return;
+    if(tagPoints() >= TAG_MAX_POINTS) { if(!st.full) { st.full = true; showToast('Tag ist voll – bitte senden'); } return; }
+    st.p.push(x, y); queueTagDraw();
+  }
+  tagCanvas.addEventListener('pointerdown', e => {
+    e.preventDefault(); tagCanvas.setPointerCapture(e.pointerId);
+    const st = {c: tagColor, w: tagSize, p: []}; tagStrokes.push(st); tagPtrs.set(e.pointerId, st); tagPoint(st, e);
+  });
+  tagCanvas.addEventListener('pointermove', e => {
+    const st = tagPtrs.get(e.pointerId); if(!st) return;
+    for(const ev of (e.getCoalescedEvents ? e.getCoalescedEvents() : [e])) tagPoint(st, ev);
+  });
+  const tagEnd = e => { tagPtrs.delete(e.pointerId); };
+  tagCanvas.addEventListener('pointerup', tagEnd); tagCanvas.addEventListener('pointercancel', tagEnd);
+  onTap(el('tag-undo'), () => { tagStrokes.pop(); queueTagDraw(); });
+  onTap(el('tag-clear'), () => { tagStrokes = []; tagPtrs.clear(); queueTagDraw(); });
+  onTap(el('tag-send'), () => {
+    let strokes = tagStrokes.filter(st => st.p.length).map(st => ({c: st.c, w: st.w, p: st.p}));
+    if(!strokes.length) { showToast('Erst einen Tag malen'); return; }
+    // The plugin relays at most 64 KiB per message: thin out the points until the tag fits.
+    while(JSON.stringify({type:'tag',strokes}).length > TAG_MAX_BYTES)
+      strokes = strokes.map(st => ({...st, p: st.p.filter((_, i) => (i >> 1) % 2 === 0 || i >= st.p.length - 2)}));
+    if(!socket.send({type:'tag',strokes})) { showToast('Keine Verbindung'); return; }
+    tagStrokes = []; tagPtrs.clear(); queueTagDraw(); showToast('Tag gesendet');
+  });
+  onTap(el('sw-canvas'), () => {
+    const on = document.body.classList.toggle('canvas-on'); el('sw-canvas').classList.toggle('active', on);
+    if(on) { fitTagCanvas(); queueTagDraw(); }
+  });
+  window.addEventListener('resize', fitTagCanvas);
+
   function renderState() {
+    renderTagUI();
     updateDeckThumb('A', state.deckA); updateDeckThumb('B', state.deckB);
     if(xfade&&!xfade.isInteracting) xfade.setValue(state.xfade); updateAudibility(state.xfade);
     el('sel-autoBars').value = state.autoBars;

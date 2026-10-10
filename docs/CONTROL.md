@@ -7,7 +7,7 @@ Extends [PROTOCOL.md](PROTOCOL.md). Send compact JSON with `type` first. The iPa
 Send full state; last writer wins. Unknown fields survive normalization; missing fields use defaults. Legacy `preset`, `gain`, `brightness` map to `deckA`, `fx.gain`, `fx.bright`.
 
 ```json
-{"type":"state","v":2,"deckA":"<preset>","deckB":"<preset>","xfade":0,"blend":2,"quant":"bar","autoBars":8,"random":true,"locked":false,"fx":{},"sync":{},"scenes":[null,null,null,null,null,null,null,null],"pool":"all","favs":[],"img":[],"stems":{"drums":true,"bass":true,"melody":true}}
+{"type":"state","v":2,"deckA":"<preset>","deckB":"<preset>","xfade":0,"blend":2,"quant":"bar","autoBars":8,"random":true,"locked":false,"fx":{},"sync":{},"scenes":[null,null,null,null,null,null,null,null],"pool":"all","favs":[],"img":[],"stems":{"drums":true,"bass":true,"melody":true},"tag":{"pulse":false,"drip":false,"neon":false,"glitch":false,"rainbow":false}}
 ```
 
 `xfade` ranges from 0 (A) to 1 (B). `blend` is transition time in seconds (0..10). `autoBars` is 0 (off) or 4/8/16/32; automatic changes load the less visible deck and swap. `locked` prevents auto changes. `pool` is `all`, `milk`, `viz` or `favs`; an empty pool falls back to all. `favs` holds up to 200 names. Eight scenes contain null or `{deckA,deckB,xfade,fx,sync,img}`; images are optional, stems are excluded.
@@ -81,6 +81,20 @@ Thumbnails: 96×54 JPEG, quality about 0.5, under 6 KiB, once per preset/session
 
 Audio bands use frequency/transient filtering: drums = transients below 180 Hz and 180 Hz..5 kHz with about 100 ms decay, plus content above 5 kHz; bass = sustained content below 180 Hz; melody = sustained content between 180 Hz and 5 kHz. All enabled bypasses exactly; all disabled is silence. Missing/invalid selection defaults to all. Selection affects both engines and image pulse; sensitivity applies afterward.
 
+## Graffiti tags
+
+The remote's canvas switch replaces the dashboard with a 16:9 wall. Strokes are drawn with the finger; the finish button sends the tag and clears the wall for the next one.
+
+```json
+{"type":"tag","strokes":[{"c":"#ffe600","w":0.018,"p":[200,700,300,250,400,700]}]}
+{"type":"trig","k":"tag","fx":"burst","q":"bar"}
+{"type":"tags","n":2}
+```
+
+`tag` is transient and not stored. `c` is `#rrggbb`, `w` the line width relative to the picture height (0.003..0.08), `p` a flat list of x,y pairs in 0..1000 with the origin at the top left. The remote keeps a tag under 4000 points and thins it out to stay below 60 kB; displays clamp everything and keep the six newest tags. Displays answer every change with `tags` (number on the wall).
+
+The eight buttons above the wall: `write` replays the strokes over 1.4 s, `burst` scatters the points and reassembles them (0.9 s) and `wipe` fades all tags out (0.6 s) — these are quantized triggers with pending keys `tag<fx>`. `pulse` (scale on the host beat, bass level when stopped), `drip` (paint runs grow over 3.5 s), `neon` (glow with white core instead of black outline), `glitch` (jumping cyan/magenta copies) and `rainbow` (cycling colours) are booleans in `state.tag`. Scenes do not include them.
+
 ## Images, layout and rendering
 
 `make pictures` copies JPG/JPEG/PNG/WebP from `PICTURES` (default `Pictues/`) and generates sorted `index.json`. Layer i uses `src`, or the i-th filename if empty.
@@ -98,7 +112,7 @@ Audio bands use frequency/transient filtering: drums = transients below 180 Hz a
 
 Landscape has four independently scrolling columns: decks/browser; performance/shots; image stage; scenes/effects. Portrait uses two columns and page scrolling. Four effect XY pads store assignments/spring mode in `vstvis_pads`; two image pads affect the selected image. Stage assumes 16:9; other ratios match relative positions, not exact pixels.
 
-`ws.js` handles connectivity, `controls.js` touch widgets, `engine.js` decks/transitions/scenes, `viz.js` shaders/analysis, `postfx.js` WebGL2 compositing. `index.html` is the display; `remote.html` the controller. `postfx-test.html` provides pixel checks; `tools/webtest.js` checks analysis and state.
+`ws.js` handles connectivity, `controls.js` touch widgets, `engine.js` decks/transitions/scenes, `viz.js` shaders/analysis, `tags.js` the graffiti layer, `postfx.js` WebGL2 compositing. `index.html` is the display; `remote.html` the controller. `postfx-test.html` provides pixel checks; `tools/webtest.js` checks analysis and state.
 
 ```js
 const levels = ShaderViz.analyze(wave, dt, sampleRate);
@@ -109,10 +123,13 @@ const fx = PostFX.create(canvas); // null without WebGL2
 fx.resize(width, height); fx.render(srcA, srcB, params);
 fx.setImage(i, image); // null clears layer
 fx.destroy();
+const tags = VJTags.create();
+tags.add(strokes, now); tags.trigger('burst', now);
+if (tags.render(now, state.tag, pulse)) params.tag = tags.canvas; // 1280×720, transparent
 ```
 
 `ShaderViz.names` contains seven `◆ ` presets: Spektrum, Oszilloskop, Kreis, Tunnel, Plasma, Sterne, Gitter. A 1024-sample FFT provides a 512×2 texture (log spectrum 30 Hz..16 kHz, waveform). Camera controls use zoom/rotation/warp/displacement. dt is already speed-scaled.
 
-PostFX params: `mix`, effect/color values, `invert`/`flash`/`black` (0..1), five `layers`, three touch points `{x,y,a}`, `time` seconds. Pipeline: touch distortion → mirror/kaleidoscope → A/B mix → normal images → RGB split → color → trails → top images → touch light → flash → blackout. Defaults reproduce A; srcB may be null.
+PostFX params: `mix`, effect/color values, `invert`/`flash`/`black` (0..1), five `layers`, three touch points `{x,y,a}`, `time` seconds. Pipeline: touch distortion → mirror/kaleidoscope → A/B mix → normal images → graffiti tags (`tag`, a canvas with alpha, uploaded each frame while shown) → RGB split → color → trails → top images → touch light → flash → blackout. Defaults reproduce A; srcB may be null.
 
 Butterchurn hooks wrap `presetEquationRunner.runFrameEquations` and modify `mdVSFrame`; reinstall after every load. `render({audioLevels, elapsedTime})` uses seconds; freeze with a tiny nonzero value because zero means unspecified. Color/inversion run through PostFX. Render hidden decks immediately before mixing.
