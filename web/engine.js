@@ -44,7 +44,8 @@
     state.deckA = rename(state.deckA); state.deckB = rename(state.deckB);
     const stems = object(raw.stems);
     state.stems = ['drums', 'bass', 'melody'].every(key => typeof stems[key] === 'boolean')
-      ? { drums: stems.drums, bass: stems.bass, melody: stems.melody } : { drums: true, bass: true, melody: true };
+      ? { drums: stems.drums, bass: stems.bass, melody: stems.melody, ...(typeof stems.hats === 'boolean' ? { hats: stems.hats } : {}) }
+      : { drums: true, bass: true, melody: true, ...(typeof stems.hats === 'boolean' ? { hats: stems.hats } : {}) };
     if (!raw.v && typeof raw.preset === 'string') state.deckA = raw.preset;
     state.xfade = clamp(state.xfade, 0, 1, 0);
     state.blend = clamp(state.blend, 0, 10, 2);
@@ -481,9 +482,10 @@
       const fresh = now - this.lastAudio < 250;
       const dt = Math.max(0, (now - this.audioFrameAt) / 1000); this.audioFrameAt = now;
       const bands = { drums: 0, bass: 0, melody: 0 };
+      if (this.bands.hats !== undefined || (this.state.stems && typeof this.state.stems.hats === 'boolean')) bands.hats = 0;
       for (const [raw, processed, state] of [[this.rawL, this.levels.timeByteArrayL, this.stemState[0]], [this.rawR, this.levels.timeByteArrayR, this.stemState[1]]]) {
         const split = fresh && root.ShaderViz ? root.ShaderViz.splitStems(raw, this.state.stems, rate, state) : null;
-        for (const key of Object.keys(bands)) bands[key] = Math.max(bands[key], split ? split[key] : 0);
+        for (const key of Object.keys(bands)) bands[key] = Math.max(bands[key], split ? (split[key] || 0) : 0);
         const selected = split ? split.wave : raw;
         let bass = 0, lowMid = 0;
         for (let i = 0; i < 1024; i++) {
@@ -496,10 +498,24 @@
       }
       for (let i = 0; i < 1024; i++) this.levels.timeByteArray[i] = (this.levels.timeByteArrayL[i] + this.levels.timeByteArrayR[i]) >> 1;
       for (const key of Object.keys(bands)) {
+        if (this.bands[key] === undefined) this.bands[key] = 0;
         const amount = 1 - Math.exp(-dt / (bands[key] > this.bands[key] ? 0.02 : 0.3));
         this.bands[key] += (bands[key] - this.bands[key]) * amount;
       }
-      if (now - this.lastBands >= 100) { this.socket.send({ type: 'bands', ...this.bands }); this.lastBands = now; }
+      if (now - this.lastBands >= 100) {
+        const spec = this.spectrum;
+        const msg = { type: 'bands', ...this.bands };
+        if (spec && spec.hits) {
+          msg.kickHit = spec.hits.kick ? 1 : 0;
+          msg.hatsHit = spec.hits.hats ? 1 : 0;
+        }
+        if (spec && spec.notes) {
+          msg.bassNote = spec.notes.bass || '';
+          msg.leadNote = spec.notes.lead || '';
+        }
+        this.socket.send(msg);
+        this.lastBands = now;
+      }
       return this.levels;
     }
 
@@ -534,7 +550,7 @@
       if (root.ShaderViz) this.spectrum = root.ShaderViz.analyze(this.levels.timeByteArray, dt, this.transport.sampleRate);
       const draw = deck => {
         if (!deck.type) { deck.visualizer.render(options); return deck.canvas; }
-        deck.viz.render(deck.type, this.spectrum, this.frameFX, options.elapsedTime);
+        deck.viz.render(deck.type, this.spectrum, this.frameFX, options.elapsedTime, this.state.stems);
         return deck.viz.canvas;
       };
       const sourceA = draw(this.decks[0]);

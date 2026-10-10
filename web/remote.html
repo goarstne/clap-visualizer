@@ -54,12 +54,15 @@ header { display: flex; flex-direction: column; background: #10151e; border-bott
 .hud-badge.play { color: var(--success); border-color: rgba(34,197,94,0.4); background: rgba(34,197,94,0.1); }
 
 /* STEMS */
-.stems { display: flex; gap: 4px; height: 100%; flex: 1; max-width: 460px; min-width: 0; }
-.stem-btn { flex: 1; position: relative; border-radius: 4px; border: 1px solid var(--card-border); background: var(--btn); overflow: hidden; font-size: 12px; font-weight: 600; min-height: 40px; }
+.stems { display: flex; gap: 4px; height: 100%; flex: 1; max-width: 520px; min-width: 0; }
+.stem-btn { flex: 1; position: relative; border-radius: 4px; border: 1px solid var(--card-border); background: var(--btn); overflow: hidden; font-size: 11px; font-weight: 600; min-height: 40px; padding: 0 2px; }
 .stem-btn.active { border-color: var(--accent); color: white; text-shadow: 0 1px 2px black; }
 .stem-meter { position: absolute; bottom: 0; left: 0; right: 0; height: 100%; background: rgba(255,255,255,0.1); transform-origin: bottom; transform: scaleY(0); transition: transform 0.05s linear; z-index: 0; pointer-events: none; }
 .stem-btn.active .stem-meter { background: rgba(56,189,248,0.3); }
-.stem-lbl { position: relative; z-index: 1; pointer-events: none; }
+.stem-lbl { position: relative; z-index: 1; pointer-events: none; display: flex; align-items: center; justify-content: center; gap: 2px; width: 100%; }
+.stem-trig { position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,0.15); pointer-events: none; z-index: 2; transition: background 0.05s ease-out, box-shadow 0.05s ease-out; }
+.stem-trig.flash { background: #38bdf8; box-shadow: 0 0 8px #38bdf8; }
+.stem-note { font-size: 9px; opacity: 0.85; font-weight: bold; color: var(--accent); margin-left: 2px; min-width: 14px; text-align: left; }
 
 /* MASTER METER */
 .master-meter { height: 4px; background: #18202c; position: relative; width: 100%; }
@@ -234,10 +237,25 @@ body.canvas-on main { display: none; }
       </div>
       <button id="sw-canvas" class="sw" title="Switches between the controls and the graffiti wall"><span>🎨 Canvas</span><span class="sw-track"></span></button>
       <div class="stems">
-        <button id="stem-all" class="stem-btn active">All</button>
-        <button class="stem-btn" data-stem="drums"><span class="stem-lbl">Drums</span><div class="stem-meter" id="m-drums"></div></button>
-        <button class="stem-btn" data-stem="bass"><span class="stem-lbl">Bass</span><div class="stem-meter" id="m-bass"></div></button>
-        <button class="stem-btn" data-stem="melody"><span class="stem-lbl">Melody</span><div class="stem-meter" id="m-melody"></div></button>
+        <button id="stem-all" class="stem-btn active" title="Enable all stems">All</button>
+        <button class="stem-btn" data-stem="drums" title="Kick & Drums">
+          <span class="stem-lbl">🥁 Kick</span>
+          <div class="stem-meter" id="m-drums"></div>
+          <div class="stem-trig" id="trig-drums"></div>
+        </button>
+        <button class="stem-btn" data-stem="bass" title="Bassline & 808">
+          <span class="stem-lbl">🎸 Bass <span class="stem-note" id="note-bass"></span></span>
+          <div class="stem-meter" id="m-bass"></div>
+        </button>
+        <button class="stem-btn" data-stem="melody" title="Chords & Lead">
+          <span class="stem-lbl">🎹 Lead <span class="stem-note" id="note-melody"></span></span>
+          <div class="stem-meter" id="m-melody"></div>
+        </button>
+        <button class="stem-btn" data-stem="hats" title="Hats & Percussion">
+          <span class="stem-lbl">✨ Hats</span>
+          <div class="stem-meter" id="m-hats"></div>
+          <div class="stem-trig" id="trig-hats"></div>
+        </button>
       </div>
     </div>
     <div class="master-meter"><div id="meter-fill" class="m-fill"></div><div id="meter-peak" class="m-peak"></div></div>
@@ -468,7 +486,7 @@ body.canvas-on main { display: none; }
       xfade:0, blend:2, quant:'bar', autoBars:8, random:true, locked:false,
       fx:fx, sync:{}, scenes:Array(8).fill(null), pool:'all', favs:[],
       img:Array.from({length:5}, ()=>({...IMG_DEFAULT})),
-      stems: {drums:true, bass:true, melody:true},
+      stems: {drums:true, bass:true, melody:true, hats:true},
       tag: {pulse:false, drip:false, neon:false, glitch:false, rainbow:false, zoom:false, spin:false, drift:false, wave:false, trail:false, add:false, diff:false, melt:false}
     };
   }
@@ -490,7 +508,12 @@ body.canvas-on main { display: none; }
     out.favs = Array.isArray(s.favs) ? s.favs : [];
     out.img = def.img.map((lyr,i)=>({...lyr, ...((Array.isArray(s.img)&&s.img[i])||{})}));
     if(!s.stems || typeof s.stems !== 'object') out.stems = {...def.stems};
-    else out.stems = {drums:!!s.stems.drums, bass:!!s.stems.bass, melody:!!s.stems.melody};
+    else out.stems = {
+      drums: typeof s.stems.drums === 'boolean' ? s.stems.drums : true,
+      bass: typeof s.stems.bass === 'boolean' ? s.stems.bass : true,
+      melody: typeof s.stems.melody === 'boolean' ? s.stems.melody : true,
+      hats: typeof s.stems.hats === 'boolean' ? s.stems.hats : (typeof s.stems.drums === 'boolean' ? s.stems.drums : true)
+    };
     // Enabled modes this version does not know stay in the state for pages that do.
     out.tag = Object.fromEntries([...Object.keys(def.tag), ...Object.keys(s.tag||{}).filter(k => s.tag[k] === true)].map(k => [k, !!(s.tag && s.tag[k] === true)]));
     out.v = 2; out.type = 'state'; return out;
@@ -575,9 +598,13 @@ body.canvas-on main { display: none; }
       } else if(msg.type==='tags') {
         el('tag-count').textContent = `Wall: ${msg.n} tag${msg.n===1?'':'s'}`;
       } else if(msg.type==='bands') {
-        ['drums','bass','melody'].forEach(s => {
+        ['drums','bass','melody','hats'].forEach(s => {
           const m = el('m-'+s); if(m && typeof msg[s]==='number') m.style.transform = `scaleY(${Math.min(1,Math.sqrt(Math.max(0,msg[s]))*1.15)})`;
         });
+        const td = el('trig-drums'); if(td) td.classList.toggle('flash', !!msg.kickHit);
+        const th = el('trig-hats'); if(th) th.classList.toggle('flash', !!msg.hatsHit);
+        const nb = el('note-bass'); if(nb && msg.bassNote !== undefined) nb.textContent = msg.bassNote || '';
+        const nl = el('note-melody'); if(nl && msg.leadNote !== undefined) nl.textContent = msg.leadNote || '';
       }
     }
   });
@@ -601,14 +628,15 @@ body.canvas-on main { display: none; }
 
   // Stems
   let stemTimers = {};
-  ['drums','bass','melody'].forEach(s => {
-    const btn = el('m-'+s).parentElement;
+  ['drums','bass','melody','hats'].forEach(s => {
+    const m = el('m-'+s); if(!m) return;
+    const btn = m.parentElement;
     btn.addEventListener('pointerdown', e => {
       e.preventDefault(); btn.setPointerCapture(e.pointerId);
       stemTimers[s] = setTimeout(() => {
         // Solo long press
         stemTimers[s] = null;
-        ['drums','bass','melody'].forEach(ss => state.stems[ss] = (ss===s));
+        ['drums','bass','melody','hats'].forEach(ss => state.stems[ss] = (ss===s));
         socket.sendState(state); renderState(); showToast('Solo: ' + btn.textContent.trim());
       }, 600);
     });
@@ -622,7 +650,7 @@ body.canvas-on main { display: none; }
     btn.addEventListener('pointerup', up); btn.addEventListener('pointercancel', up);
   });
   el('stem-all').addEventListener('click', ()=>{
-    state.stems = {drums:true,bass:true,melody:true}; socket.sendState(state); renderState();
+    state.stems = {drums:true,bass:true,melody:true,hats:true}; socket.sendState(state); renderState();
   });
 
   ['prev','swap','next'].forEach(k => el('btn-'+k).addEventListener('click',()=>socket.send({type:'trig',k,q:state.quant})));
@@ -991,8 +1019,11 @@ body.canvas-on main { display: none; }
     FX_DEFS.forEach(d => { const v=state.fx[d.key]??d.def; if(!fxFaders[d.key].isInteracting) fxFaders[d.key].setValue(v); fxFaderVals[d.key].textContent=fmtFx(d.key,v); el('fs-'+d.key).value=state.sync[d.key]||''; });
     syncPads(); renderScenesUI();
     // STEMS UI
-    el('stem-all').classList.toggle('active', state.stems.drums&&state.stems.bass&&state.stems.melody);
-    ['drums','bass','melody'].forEach(s => { el('m-'+s).parentElement.classList.toggle('active', state.stems[s]); });
+    el('stem-all').classList.toggle('active', state.stems.drums&&state.stems.bass&&state.stems.melody&&state.stems.hats);
+    ['drums','bass','melody','hats'].forEach(s => {
+      const m = el('m-'+s);
+      if(m && m.parentElement) m.parentElement.classList.toggle('active', !!state.stems[s]);
+    });
   }
   renderState(); renderBrowser();
 })();

@@ -19,11 +19,11 @@ An audio-reactive VJ playground for REAPER: a lightweight native CLAP effect str
 ## What you can do
 
 - **Mix two visual decks:** A/B crossfader, timed transitions, automatic switching and beat/bar quantization driven by host transport.
-- **Explore MilkDrop and shaders:** bundled Butterchurn presets plus seven visual types: spectrum, oscilloscope, circle, tunnel, plasma, stars and grid. Search presets, filter groups and save favorites.
+- **Explore MilkDrop and shaders:** bundled Butterchurn presets plus seven visual types: spectrum, oscilloscope, circle, tunnel, plasma, stars and grid, all modulated by Clubber-style 4D vectors (`[energy, envelope, trigger, pitch]`). Search presets, filter groups and save favorites.
 - **Perform with touch:** four assignable XY pads, spring return, effect faders and 16 momentary effects, including blackout, invert, kaleidoscope, RGB split, freeze and strobe.
 - **Paint with images:** five image layers with drag, pinch, rotation, opacity, six blend modes, tiling, hue, wobble and bass pulse. Trigger zoom, spin and flash shots; draw light with up to three fingers.
 - **Tag the wall:** a switch turns the controller into a 16:9 canvas. Draw graffiti tags with your finger; a finished tag is mixed into the visuals and runs through mirror, kaleidoscope, colour and trails. Sixteen buttons replay, burst and wipe the tags, restyle them (pulse, drip, neon, glitch, rainbow), move them in time with the host (zoom, rotation, drift, wave, trail) or melt them into the picture (light, negative, melt).
-- **Shape the response:** drums, bass and melody selectors with level meters. This is frequency/transient filtering, not AI instrument separation.
+- **Shape the response:** Kick, Bass, Lead and Hats selectors with live level meters, beat trigger indicators and detected pitch note badges. Driven by Clubber-style musical frequency and transient analysis (not AI stem separation).
 - **Recall a look:** eight scene slots, beat-linked effects and visual state saved with the REAPER project. Favorites and pad assignments stay in the browser.
 - **Keep audio intact:** stereo float/double passthrough; visualization and networking run outside the audio callback.
 - **Bring your friends in:** scan a QR code in the plugin window to join from a phone, or start a Cloudflare tunnel with one click and share the link as a ready-made picture. Guests can watch, hear the master bus and play along.

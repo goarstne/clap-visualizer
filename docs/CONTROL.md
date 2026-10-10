@@ -7,7 +7,7 @@ Extends [PROTOCOL.md](PROTOCOL.md). Send compact JSON with `type` first. The iPa
 Send full state; last writer wins. Unknown fields survive normalization; missing fields use defaults. Legacy `preset`, `gain`, `brightness` map to `deckA`, `fx.gain`, `fx.bright`.
 
 ```json
-{"type":"state","v":2,"deckA":"<preset>","deckB":"<preset>","xfade":0,"blend":2,"quant":"bar","autoBars":8,"random":true,"locked":false,"fx":{},"sync":{},"scenes":[null,null,null,null,null,null,null,null],"pool":"all","favs":[],"img":[],"stems":{"drums":true,"bass":true,"melody":true},"tag":{"pulse":false,"drip":false,"neon":false,"glitch":false,"rainbow":false,"zoom":false,"spin":false,"drift":false,"wave":false,"trail":false,"add":false,"diff":false,"melt":false}}
+{"type":"state","v":2,"deckA":"<preset>","deckB":"<preset>","xfade":0,"blend":2,"quant":"bar","autoBars":8,"random":true,"locked":false,"fx":{},"sync":{},"scenes":[null,null,null,null,null,null,null,null],"pool":"all","favs":[],"img":[],"stems":{"drums":true,"bass":true,"melody":true,"hats":true},"tag":{"pulse":false,"drip":false,"neon":false,"glitch":false,"rainbow":false,"zoom":false,"spin":false,"drift":false,"wave":false,"trail":false,"add":false,"diff":false,"melt":false}}
 ```
 
 `xfade` ranges from 0 (A) to 1 (B). `blend` is transition time in seconds (0..10). `autoBars` is 0 (off) or 4/8/16/32; automatic changes load the less visible deck and swap. `locked` prevents auto changes. `pool` is `all`, `milk`, `viz` or `favs`; an empty pool falls back to all. `favs` holds up to 200 names. Eight scenes contain null or `{deckA,deckB,xfade,fx,sync,img}`; images are optional, stems are excluded.
@@ -74,12 +74,12 @@ Actions: `swap` crossfades; `load` loads the named deck without changing mix; `s
 ```json
 {"type":"thumb","preset":"<name>","data":"data:image/jpeg;base64,..."}
 {"type":"pending","k":"swap","beats":2.5}
-{"type":"bands","drums":0.42,"bass":0.61,"melody":0.18}
+{"type":"bands","drums":0.42,"bass":0.61,"melody":0.18,"hats":0.25,"kickHit":1,"hatsHit":0,"bassNote":"C2","leadNote":"A4"}
 ```
 
-Thumbnails: 96×54 JPEG, quality about 0.5, under 6 KiB, once per preset/session after three seconds visible; cached by the remote. Optional pending feedback: about 5 Hz; zero means complete. Bands: about 10 Hz even for disabled sources, 0..1, fast attack and about 0.3 s decay.
+Thumbnails: 96×54 JPEG, quality about 0.5, under 6 KiB, once per preset/session after three seconds visible; cached by the remote. Optional pending feedback: about 5 Hz; zero means complete. Bands: about 10 Hz even for disabled sources, 0..1, fast attack and about 0.3 s decay. Feedback includes transient hits (`kickHit`, `hatsHit`) for UI LED flash feedback and detected musical pitches (`bassNote`, `leadNote`).
 
-Audio bands use frequency/transient filtering: drums = transients below 180 Hz and 180 Hz..5 kHz with about 100 ms decay, plus content above 5 kHz; bass = sustained content below 180 Hz; melody = sustained content between 180 Hz and 5 kHz. All enabled bypasses exactly; all disabled is silence. Missing/invalid selection defaults to all. Selection affects both engines and image pulse; sensitivity applies afterward.
+Audio bands use frequency/transient filtering: drums = transients below 180 Hz; bass = sustained content below 180 Hz; melody = sustained content between 180 Hz and 5 kHz; hats = high-frequency transients above 2.5 kHz. All enabled bypasses exactly; all disabled is silence. Missing/invalid selection defaults to all. Selection affects both engines and image pulse; sensitivity applies afterward.
 
 ## Page versions
 
@@ -153,7 +153,7 @@ if (tags.render(now, state.tag, pulse, clock)) params.tag = tags.canvas; // 1280
 params.tagBlend = 0; // 1 add, 2 difference, 3 melt
 ```
 
-`ShaderViz.names` contains seven `◆ ` presets: Spectrum, Oscilloscope, Circle, Tunnel, Plasma, Stars, Grid. German names from older projects are mapped on load. A 1024-sample FFT provides a 512×2 texture (log spectrum 30 Hz..16 kHz, waveform). Camera controls use zoom/rotation/warp/displacement. dt is already speed-scaled.
+`ShaderViz.names` contains seven `◆ ` presets: Spectrum, Oscilloscope, Circle, Tunnel, Plasma, Stars, Grid. German names from older projects are mapped on load. A 1024-sample FFT provides a 512×2 texture (log spectrum 30 Hz..16 kHz, waveform) alongside Clubber-style 4D modulation vectors `uKick`, `uBassBand`, `uLead`, `uHats` (`vec4 [energy, envelope, trigger, pitch]`) for musical transient punches (`.z`) and harmonic pitch tracking (`.w`). Camera controls use zoom/rotation/warp/displacement. dt is already speed-scaled.
 
 PostFX params: `mix`, effect/color values, `invert`/`flash`/`black` (0..1), five `layers`, three touch points `{x,y,a}`, `time` seconds. Pipeline: touch distortion → mirror/kaleidoscope → A/B mix → normal images → graffiti tags (`tag`, a canvas with alpha, uploaded each frame while shown) → RGB split → color → trails → top images → touch light → flash → blackout. Defaults reproduce A; srcB may be null.
 

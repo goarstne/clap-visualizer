@@ -13,6 +13,19 @@ assert(Math.abs(peak - expected) < 8, `peak at ${peak}, expected ${expected}`);
 assert(levels.mid + levels.treb > levels.bass * 5 && levels.tex[512] === wave[0]);
 assert(viz.names.length === 7 && viz.names.every(name => name.startsWith('◆ ')));
 
+// Clubber-style 4D vectors (energy, envelope, trigger, pitch) & musical note detection
+const resA2 = viz.analyze(Uint8Array.from({ length: 1024 }, (_, i) => Math.round(128 + 100 * Math.sin(2 * Math.PI * 110 * i / 48000))), 0.016, 48000);
+assert(resA2.bands && resA2.bands.bass && resA2.bands.bass.length === 4);
+assert.strictEqual(resA2.notes.bass, 'A2');
+for (const k of ['kick', 'bass', 'lead', 'hats']) {
+  assert(resA2.bands[k].every(v => v >= 0 && v <= 1));
+}
+const resA4 = viz.analyze(Uint8Array.from({ length: 1024 }, (_, i) => Math.round(128 + 100 * Math.sin(2 * Math.PI * 440 * i / 48000))), 0.016, 48000);
+assert.strictEqual(resA4.notes.lead, 'A4');
+const resHits = viz.analyze(Uint8Array.from({ length: 1024 }, (_, i) => i % 240 === 0 ? 255 : 128), 0.016, 48000);
+assert(resHits.hits && (resHits.hits.kick || resHits.hits.hats));
+assert(resHits.bands.kick[2] > 0.5 || resHits.bands.hats[2] > 0.5);
+
 global.window = { location: { search: '' } };
 require(path.join(web, 'engine.js'));
 const { normalize, Engine } = global.window.VJEngine;
@@ -28,6 +41,8 @@ for (const stems of [null, [], { drums: true }, { ...all, bass: 1 }]) {
   assert.deepStrictEqual(normalize({ v: 2, stems }).stems, all);
 }
 assert.deepStrictEqual(normalize({ v: 2, stems: none }).stems, none);
+assert.deepStrictEqual(normalize({ v: 2, stems: { ...all, hats: false } }).stems, { ...all, hats: false });
+assert.deepStrictEqual(normalize({ v: 2, stems: { ...none, hats: true } }).stems, { ...none, hats: true });
 const sine = hz => Array.from({ length: 1024 }, (_, i) => 128 + 100 * Math.sin(2 * Math.PI * hz * i / 48000));
 const low = viz.splitStems(sine(60), all, 48000), high = viz.splitStems(sine(1000), all, 48000);
 assert(low.bass > 0.4 && low.bass > low.melody * 5 && low.drums < 0.01);
