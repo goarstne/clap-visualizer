@@ -81,6 +81,14 @@ Thumbnails: 96×54 JPEG, quality about 0.5, under 6 KiB, once per preset/session
 
 Audio bands use frequency/transient filtering: drums = transients below 180 Hz and 180 Hz..5 kHz with about 100 ms decay, plus content above 5 kHz; bass = sustained content below 180 Hz; melody = sustained content between 180 Hz and 5 kHz. All enabled bypasses exactly; all disabled is silence. Missing/invalid selection defaults to all. Selection affects both engines and image pulse; sensitivity applies afterward.
 
+## Page versions
+
+```json
+{"type":"build","sig":-1234567}
+```
+
+A page left open across an update keeps running old code and would overwrite the state with what it knows. Each page hashes the served page and script files at load and announces the hash when it connects. A page that receives a different hash fetches the files again and reloads itself once if the server no longer serves what it loaded.
+
 ## Graffiti tags
 
 The remote's canvas switch replaces the dashboard with a 16:9 wall. Strokes are drawn with the finger; the finish button sends the tag and clears the wall for the next one.

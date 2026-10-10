@@ -491,7 +491,8 @@ body.canvas-on main { display: none; }
     out.img = def.img.map((lyr,i)=>({...lyr, ...((Array.isArray(s.img)&&s.img[i])||{})}));
     if(!s.stems || typeof s.stems !== 'object') out.stems = {...def.stems};
     else out.stems = {drums:!!s.stems.drums, bass:!!s.stems.bass, melody:!!s.stems.melody};
-    out.tag = Object.fromEntries(Object.keys(def.tag).map(k => [k, !!(s.tag && s.tag[k] === true)]));
+    // Enabled modes this version does not know stay in the state for pages that do.
+    out.tag = Object.fromEntries([...Object.keys(def.tag), ...Object.keys(s.tag||{}).filter(k => s.tag[k] === true)].map(k => [k, !!(s.tag && s.tag[k] === true)]));
     out.v = 2; out.type = 'state'; return out;
   }
 

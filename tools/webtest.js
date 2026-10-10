@@ -146,7 +146,9 @@ console.log('Web: spectrum peak, shader type list, state clamping, stems, audio 
 const tagModes = ['pulse', 'drip', 'neon', 'glitch', 'rainbow', 'zoom', 'spin', 'drift', 'wave', 'trail', 'add', 'diff', 'melt'];
 const tagState = on => Object.fromEntries(tagModes.map(key => [key, on.includes(key)]));
 assert.deepStrictEqual(normalize({ v: 2 }).tag, tagState([]));
-assert.deepStrictEqual(normalize({ v: 2, tag: { neon: true, spin: true, drip: 1, bogus: true } }).tag, tagState(['neon', 'spin']));
+assert.deepStrictEqual(normalize({ v: 2, tag: { neon: true, spin: true, drip: 1, off: false } }).tag, tagState(['neon', 'spin']));
+// A mode from a newer page survives a round trip through this one.
+assert.deepStrictEqual(normalize({ v: 2, tag: { neon: true, future: true } }).tag, { ...tagState(['neon']), future: true });
 assert.strictEqual(normalize({ v: 2 }, normalize({ v: 2, tag: { pulse: true } })).tag.pulse, true);
 require(path.join(web, 'tags.js'));
 const { parse } = global.window.VJTags;

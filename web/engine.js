@@ -53,7 +53,8 @@
     if (!['all', 'milk', 'viz', 'favs'].includes(state.pool)) state.pool = 'all';
     state.favs = Array.isArray(state.favs) ? state.favs.filter(name => typeof name === 'string').slice(0, 200) : [];
     const tag = { ...object(previous.tag), ...object(raw.tag) };
-    state.tag = Object.fromEntries(tagModes.map(key => [key, tag[key] === true]));
+    // Enabled modes this version does not know stay in the state for pages that do.
+    state.tag = Object.fromEntries([...tagModes, ...Object.keys(tag).filter(key => tag[key] === true)].map(key => [key, tag[key] === true]));
     const img = Array.isArray(raw.img) ? raw.img : [], oldImg = Array.isArray(previous.img) ? previous.img : [];
     state.img = Array.from({ length: 5 }, (_, i) => {
       const layer = { ...imgDefault(), ...object(oldImg[i]), ...object(img[i]) };

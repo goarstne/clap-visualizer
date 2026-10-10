@@ -12,6 +12,19 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
+  // A page that stays open across an update keeps running old code and would send old state.
+  // Every page hashes the served files when it loads and announces the hash on connect; a page
+  // that hears a different hash checks the server again and reloads itself if it is the stale one.
+  const FILES = ['index.html', 'remote.html', 'ws.js', 'controls.js', 'engine.js', 'postfx.js', 'tags.js', 'viz.js'];
+  async function signature() {
+    let hash = 0;
+    for (const file of FILES) {
+      const text = await (await fetch(file, { cache: 'no-store' })).text();
+      for (let i = 0; i < text.length; i++) hash = (hash * 31 + text.charCodeAt(i)) | 0;
+    }
+    return hash;
+  }
+
   class VisualizerSocket {
     constructor(options = {}) {
       this.role = options.role === 'display' ? 'display' : 'remote';
@@ -26,8 +39,26 @@
       this.ws = null;
       this.reconnectTimer = null;
       this.destroyed = false;
+      this.build = null;
+      if (typeof fetch === 'function' && typeof location !== 'undefined') {
+        signature().then(build => { this.build = build; this.send({ type: 'build', sig: build }); }).catch(() => {});
+      }
 
       this.connect();
+    }
+
+    // Another page runs different files: reload if the server no longer serves what this page loaded.
+    checkBuild(other) {
+      if (this.build === null || other === this.build) return;
+      signature().then(current => {
+        if (current === this.build) return;
+        // One reload per served version, so a broken update cannot loop.
+        try {
+          if (sessionStorage.getItem('vstvis_reload') === String(current)) return;
+          sessionStorage.setItem('vstvis_reload', String(current));
+        } catch (e) {}
+        location.reload();
+      }).catch(() => {});
     }
 
     resolveUrl() {
@@ -71,6 +102,7 @@
           // Protocol handshake
           const hello = this.role === 'display' ? 'hello display' : 'hello remote';
           this.ws.send(hello);
+          if (this.build !== null) this.send({ type: 'build', sig: this.build });
         };
 
         this.ws.onmessage = (event) => {
@@ -111,7 +143,9 @@
         }
 
         if (parsed && typeof parsed === 'object') {
-          if (parsed.type === 'state') {
+          if (parsed.type === 'build') {
+            this.checkBuild(parsed.sig);
+          } else if (parsed.type === 'state') {
             this.onState(parsed);
           } else if (parsed.type === 'transport') {
             this.onTransport(parsed);
