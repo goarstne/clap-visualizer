@@ -11,7 +11,9 @@
 
   const WIDTH = 1280, HEIGHT = 720, MAX_TAGS = 6, MAX_POINTS = 4000;
   const WRITE_MS = 1400, BURST_MS = 900, WIPE_MS = 600;
-  const MODES = ['pulse', 'drip', 'neon', 'glitch', 'rainbow'];
+  // zoom, spin, drift and wave move the tags; trail leaves fading copies behind.
+  // add, diff and melt only choose how PostFX blends the layer with the picture.
+  const MODES = ['pulse', 'drip', 'neon', 'glitch', 'rainbow', 'zoom', 'spin', 'drift', 'wave', 'trail', 'add', 'diff', 'melt'];
   const SHOTS = ['write', 'burst', 'wipe'];
 
   // Deterministic per-point noise, so a burst flies apart the same way every frame.
@@ -78,14 +80,18 @@
       return true;
     }
 
-    // Traces the first `shown` pixels of the tag's path; `spread` > 0 scatters the points.
-    function trace(tag, stroke, s, shown, spread, shiftX) {
+    // Traces the first `shown` pixels of the tag's path; `spread` > 0 scatters the points, `wave` >= 0 bends them.
+    function trace(tag, stroke, s, shown, spread, shiftX, wave) {
       const p = stroke.points, visible = shown - stroke.offset;
       if (visible <= 0) return false;
       ctx.beginPath();
       for (let i = 0; i < stroke.count; i++) {
         if (stroke.length[i] > visible) break;
         let x = p[i * 2] * WIDTH + shiftX, y = p[i * 2 + 1] * HEIGHT;
+        if (wave >= 0) {
+          const bendX = Math.sin(y * 0.018 + wave * 5) * 14, bendY = Math.cos(x * 0.014 + wave * 4) * 18;
+          x += bendX; y += bendY;
+        }
         if (spread > 0) {
           const angle = Math.atan2(y - tag.cy, x - tag.cx) + (noise(s * 31 + i) - 0.5) * 2.4;
           const distance = spread * (0.35 + noise(i * 7 + s)) * HEIGHT;
@@ -97,7 +103,7 @@
       return true;
     }
 
-    function paint(tag, index, now, modes, shown, spread, alpha) {
+    function paint(tag, index, now, modes, shown, spread, alpha, wave) {
       const glitch = modes.glitch && noise(Math.floor(now / 70) + index) > 0.45;
       tag.strokes.forEach((stroke, s) => {
         const color = modes.rainbow ? 'hsl(' + ((now * 0.12 + s * 47 + index * 80) % 360) + ',100%,60%)' : stroke.color;
@@ -109,15 +115,17 @@
           passes.unshift(['#00ffff', stroke.width, 0.8, jump], ['#ff00ff', stroke.width, 0.8, -jump]);
         }
         for (const [style, width, opacity, shift] of passes) {
-          if (!trace(tag, stroke, s, shown, spread, shift || 0)) continue;
+          if (!trace(tag, stroke, s, shown, spread, shift || 0, wave)) continue;
           ctx.globalAlpha = alpha * opacity; ctx.strokeStyle = style; ctx.lineWidth = width; ctx.stroke();
         }
       });
     }
 
     // Draws all tags for this frame. Returns true while the canvas shows anything.
-    function render(now, modes, pulse) {
+    // `clock` drives the movement: host beats while playing, so motion follows the tempo.
+    function render(now, modes, pulse, clock) {
       modes = modes || {};
+      if (!Number.isFinite(clock)) clock = now / 500;
       tags = tags.filter(tag => tag.wipeAt === null || now - tag.wipeAt < WIPE_MS);
       if (!tags.length) {
         if (!blank) { ctx.clearRect(0, 0, WIDTH, HEIGHT); blank = true; }
@@ -125,15 +133,28 @@
         return false;
       }
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, WIDTH, HEIGHT); blank = false;
+      if (modes.trail) {
+        // Fading instead of clearing leaves a tail behind everything that moves.
+        ctx.globalCompositeOperation = 'destination-out'; ctx.globalAlpha = 1;
+        ctx.fillStyle = 'rgba(0,0,0,0.07)'; ctx.fillRect(0, 0, WIDTH, HEIGHT);
+        ctx.globalCompositeOperation = 'source-over';
+      } else ctx.clearRect(0, 0, WIDTH, HEIGHT);
+      blank = false;
       if (modes.drip) { if (dripAt === null) dripAt = now; } else dripAt = null;
       tags.forEach((tag, index) => {
         const written = Math.min(1, (now - tag.writeAt) / WRITE_MS);
         const burst = tag.burstAt === null ? 1 : Math.min(1, (now - tag.burstAt) / BURST_MS);
         if (burst >= 1) tag.burstAt = null;
         const alpha = tag.wipeAt === null ? 1 : 1 - (now - tag.wipeAt) / WIPE_MS;
-        const scale = modes.pulse ? 1 + 0.14 * Math.max(0, Math.min(1, pulse || 0)) : 1;
-        ctx.setTransform(scale, 0, 0, scale, tag.cx * (1 - scale), tag.cy * (1 - scale));
+        // One zoom breath per four beats, one turn per eight; tags alternate direction and phase.
+        let scale = modes.pulse ? 1 + 0.14 * Math.max(0, Math.min(1, pulse || 0)) : 1;
+        if (modes.zoom) scale *= 1 + 0.38 * Math.sin(clock * Math.PI / 2 + index * 1.3);
+        const angle = modes.spin ? clock * Math.PI / 4 * (index % 2 ? -1 : 1) : 0;
+        const moveX = modes.drift ? Math.sin(clock * 0.55 + index * 2.1) * 0.11 * WIDTH : 0;
+        const moveY = modes.drift ? Math.cos(clock * 0.37 + index * 1.7) * 0.13 * HEIGHT : 0;
+        const cos = Math.cos(angle) * scale, sin = Math.sin(angle) * scale;
+        // Scale and rotate around the tag's own centre, then move it.
+        ctx.setTransform(cos, sin, -sin, cos, tag.cx - cos * tag.cx + sin * tag.cy + moveX, tag.cy - sin * tag.cx - cos * tag.cy + moveY);
         if (dripAt !== null && written >= 1) {
           const grown = Math.min(1, (now - dripAt) / 3500);
           for (const drip of tag.drips) {
@@ -143,7 +164,7 @@
             ctx.beginPath(); ctx.moveTo(drip.x, drip.y); ctx.lineTo(drip.x, drip.y + drip.length * grown); ctx.stroke();
           }
         }
-        paint(tag, index, now, modes, written * tag.path, burst < 1 ? 0.4 * Math.sin(Math.PI * burst) : 0, alpha);
+        paint(tag, index, now, modes, written * tag.path, burst < 1 ? 0.4 * Math.sin(Math.PI * burst) : 0, alpha, modes.wave ? clock + index : -1);
       });
       ctx.globalAlpha = 1;
       return true;

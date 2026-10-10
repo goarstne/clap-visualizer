@@ -14,6 +14,8 @@
  *
  * params.tag (a canvas with alpha, see tags.js) is mixed in right after the
  * in-chain images, so graffiti tags run through all following effects.
+ * params.tagBlend: 0 paint over, 1 add light, 2 difference, 3 melt (the tag
+ * bends and tints the picture underneath instead of covering it).
  */
 
 (function (root, factory) {
@@ -141,7 +143,16 @@
     '  vec3 c = layers(mix(a, b, uMix), uv, 0.0);\n' +
     '  if (uTagOn > 0.0) {\n' +
     '    vec4 t = texture(uTag, uv);\n' +
-    '    c = mix(c, t.rgb, t.a);\n' +
+    '    if (uTagOn > 3.5) {\n' +
+    '      vec2 e = vec2(0.004 / uAspect, 0.004);\n' +
+    '      vec2 slope = vec2(texture(uTag, uv + vec2(e.x, 0.0)).a - texture(uTag, uv - vec2(e.x, 0.0)).a,\n' +
+    '                        texture(uTag, uv + vec2(0.0, e.y)).a - texture(uTag, uv - vec2(0.0, e.y)).a);\n' +
+    '      vec2 o = uv + slope * 0.05 + t.a * 0.025 * vec2(sin(uTime * 2.0 + uv.y * 30.0), cos(uTime * 1.7 + uv.x * 30.0));\n' +
+    '      vec3 under = layers(mix(texture(uSrcA, o).rgb, texture(uSrcB, o).rgb, uMix), o, 0.0);\n' +
+    '      c = mix(c, under * (0.55 + 1.3 * t.rgb) + t.rgb * (0.22 + 0.6 * length(slope)), t.a);\n' +
+    '    } else if (uTagOn > 2.5) c = mix(c, abs(c - t.rgb), t.a);\n' +
+    '    else if (uTagOn > 1.5) c += t.rgb * t.a;\n' +
+    '    else c = mix(c, t.rgb, t.a);\n' +
     '  }\n' +
     '  return c;\n' +
     '}\n' +
@@ -463,7 +474,7 @@
     gl.uniform1f(u.uBlack, black);
     gl.uniform1f(u.uAspect, w / h);
     gl.uniform1f(u.uTime, val(p, 'time', 0));
-    gl.uniform1f(u.uTagOn, p.tag ? 1 : 0);
+    gl.uniform1f(u.uTagOn, p.tag ? 1 + clamp(Math.round(val(p, 'tagBlend', 0)), 0, 3) : 0);
     if (p.tag) {
       // The tag canvas animates, so it is uploaded every frame it is shown.
       gl.activeTexture(gl.TEXTURE0 + TAG_UNIT);

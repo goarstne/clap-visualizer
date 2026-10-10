@@ -143,11 +143,14 @@ for (const routine of ['zoom', 'spin', 'flash', 'unknown']) {
 console.log('Web: spectrum peak, shader type list, state clamping, stems, audio bypass/bands, shot routines OK');
 
 // Graffiti tags: effect modes are plain booleans, and tag strokes from the wire are clamped.
-assert.deepStrictEqual(normalize({ v: 2 }).tag, { pulse: false, drip: false, neon: false, glitch: false, rainbow: false });
-assert.deepStrictEqual(normalize({ v: 2, tag: { neon: true, drip: 1, bogus: true } }).tag, { pulse: false, drip: false, neon: true, glitch: false, rainbow: false });
+const tagModes = ['pulse', 'drip', 'neon', 'glitch', 'rainbow', 'zoom', 'spin', 'drift', 'wave', 'trail', 'add', 'diff', 'melt'];
+const tagState = on => Object.fromEntries(tagModes.map(key => [key, on.includes(key)]));
+assert.deepStrictEqual(normalize({ v: 2 }).tag, tagState([]));
+assert.deepStrictEqual(normalize({ v: 2, tag: { neon: true, spin: true, drip: 1, bogus: true } }).tag, tagState(['neon', 'spin']));
 assert.strictEqual(normalize({ v: 2 }, normalize({ v: 2, tag: { pulse: true } })).tag.pulse, true);
 require(path.join(web, 'tags.js'));
 const { parse } = global.window.VJTags;
+assert.deepStrictEqual(global.window.VJTags.MODES, tagModes);
 assert.strictEqual(parse(null), null);
 assert.strictEqual(parse([{ p: [1] }, { c: '#fff' }]), null);
 const tag = parse([{ c: '#ffe600', w: 0.02, p: [0, 0, 500, 0, 500, 1000] }, { c: 'url(x)', w: 99, p: [-50, 2000, 'x', 400] }]);

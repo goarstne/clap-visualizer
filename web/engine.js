@@ -15,7 +15,7 @@
     x: [-1.5, 1.5, 0], y: [-1.5, 1.5, 0], s: [0.05, 4, 0.6], r: [-31.4, 31.4, 0],
     o: [0, 1, 1], pulse: [0, 1, 0], spin: [-2, 2, 0], tile: [1, 6, 1], hue: [0, 360, 0], wob: [0, 1, 0]
   };
-  const tagModes = ['pulse', 'drip', 'neon', 'glitch', 'rainbow'];
+  const tagModes = ['pulse', 'drip', 'neon', 'glitch', 'rainbow', 'zoom', 'spin', 'drift', 'wave', 'trail', 'add', 'diff', 'melt'];
   const imgDefault = () => ({
     src: '', on: false, x: 0, y: 0, s: 0.6, r: 0, o: 1, m: 0, pulse: 0, spin: 0, top: false, tile: 1, hue: 0, wob: 0
   });
@@ -537,10 +537,13 @@
       for (const point of this.touch) point.a += ((point.on ? 1 : 0) - point.a) * (1 - Math.exp(-dt / (point.on ? 0.05 : 0.4)));
       // Pulse follows the beat while the host plays, otherwise the bass level.
       const pulse = this.transport.playing && this.transport.bpm > 0 ? (1 - (beat % 1 + 1) % 1) ** 2 : this.spectrum ? this.spectrum.bass : 0;
-      const tagCanvas = this.tags && this.tags.render(now, this.state.tag, pulse) ? this.tags.canvas : null;
+      // Tag movement runs on host beats while playing and at 120 BPM otherwise.
+      const clock = this.transport.playing && this.transport.bpm > 0 ? beat : now / 500;
+      const tagCanvas = this.tags && this.tags.render(now, this.state.tag, pulse, clock) ? this.tags.canvas : null;
+      const tagBlend = this.state.tag.melt ? 3 : this.state.tag.diff ? 2 : this.state.tag.add ? 1 : 0;
       if (this.fx) {
         this.fx.render(sourceA, sourceB, {
-          ...this.frameFX, mix: this.mix, tag: tagCanvas, layers: this.layers(dt, now), touch: this.touch, time: now / 1000 % 3600, kaleido: this.held.kaleido ? 6 : Math.round(this.frameFX.kaleido),
+          ...this.frameFX, mix: this.mix, tag: tagCanvas, tagBlend, layers: this.layers(dt, now), touch: this.touch, time: now / 1000 % 3600, kaleido: this.held.kaleido ? 6 : Math.round(this.frameFX.kaleido),
           mirror: this.held.mirror ? 3 : Math.round(this.frameFX.mirror),
           invert: this.held.invert ? 1 : 0, black: this.held.black ? 1 : 0,
           flash: Math.max(0, 1 - (now - this.flashAt) / 150)

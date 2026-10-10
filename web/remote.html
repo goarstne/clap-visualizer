@@ -201,8 +201,9 @@ main { flex: 1; padding: 6px; gap: 6px; overflow: hidden; display: grid; min-hei
 body.canvas-on #tagview { display: flex; }
 body.canvas-on main { display: none; }
 .tag-fx { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; flex-shrink: 0; }
-.tag-fx button { min-height: 52px; font-size: 12px; font-weight: bold; flex-direction: column; gap: 1px; padding: 0 2px; min-width: 0; border-width: 2px; }
-.tag-fx button .sub { font-size: 9px; font-weight: normal; opacity: 0.75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.tag-fx button { min-height: 40px; font-size: 11px; font-weight: bold; padding: 0 2px; min-width: 0; white-space: nowrap; overflow: hidden; }
+.tag-fx button.shot { border-color: rgba(234,179,8,0.45); }
+.tag-fx button.melt.active { border-color: var(--accent-b); color: var(--accent-b); background: rgba(168,85,247,0.15); }
 .tag-tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; flex-shrink: 0; }
 .tag-tools button { min-height: 44px; padding: 0 12px; font-size: 12px; font-weight: bold; }
 .tag-group { display: flex; gap: 4px; align-items: center; }
@@ -468,7 +469,7 @@ body.canvas-on main { display: none; }
       fx:fx, sync:{}, scenes:Array(8).fill(null), pool:'all', favs:[],
       img:Array.from({length:5}, ()=>({...IMG_DEFAULT})),
       stems: {drums:true, bass:true, melody:true},
-      tag: {pulse:false, drip:false, neon:false, glitch:false, rainbow:false}
+      tag: {pulse:false, drip:false, neon:false, glitch:false, rainbow:false, zoom:false, spin:false, drift:false, wave:false, trail:false, add:false, diff:false, melt:false}
     };
   }
   let state = createDefaultState();
@@ -878,12 +879,16 @@ body.canvas-on main { display: none; }
   el('btn-fx-reset').onclick = () => { FX_DEFS.forEach(d=>{state.fx[d.key]=d.def; fxFaders[d.key].setValue(d.def); fxFaderVals[d.key].textContent=fmtFx(d.key,d.def); el('fs-'+d.key).value='';}); state.sync={}; syncPads(); socket.sendState(state); showToast('FX Reset'); };
 
   // GRAFFITI: draw a tag with the finger, send it when finished, trigger tag effects.
+  // Row 1: one-shots and looks. Row 2: movement, then the three ways a tag melts into the picture.
   const TAG_FX = [
-    {fx:'write', l:'✍ Schreiben', s:'neu zeichnen'}, {fx:'burst', l:'💥 Explosion', s:'zerplatzt'},
-    {mode:'pulse', l:'💓 Puls', s:'im Beat'}, {mode:'drip', l:'💧 Drips', s:'Farbe läuft'},
-    {mode:'neon', l:'💡 Neon', s:'leuchtet'}, {mode:'glitch', l:'⚡ Glitch', s:'Störung'},
-    {mode:'rainbow', l:'🌈 Regenbogen', s:'Farbrausch'}, {fx:'wipe', l:'🧽 Wischen', s:'Wand leeren'}
+    {fx:'write', l:'✍ Schreiben'}, {fx:'burst', l:'💥 Explosion'}, {fx:'wipe', l:'🧽 Wischen'},
+    {mode:'pulse', l:'💓 Puls'}, {mode:'drip', l:'💧 Drips'}, {mode:'neon', l:'💡 Neon'},
+    {mode:'glitch', l:'⚡ Glitch'}, {mode:'rainbow', l:'🌈 Regenbogen'},
+    {mode:'zoom', l:'🔍 Zoom'}, {mode:'spin', l:'🌀 Rotation'}, {mode:'drift', l:'🎈 Schweben'},
+    {mode:'wave', l:'🌊 Welle'}, {mode:'trail', l:'☄ Schweif'},
+    {mode:'add', l:'✨ Licht', melt:true}, {mode:'diff', l:'◐ Negativ', melt:true}, {mode:'melt', l:'🫠 Schmelzen', melt:true}
   ];
+  const TAG_BLENDS = TAG_FX.filter(d => d.melt).map(d => d.mode);
   const TAG_COLORS = ['#ffffff','#ffe600','#ff2d95','#ff5a1f','#3dff6e','#19c8ff','#a855f7','#ff1f1f'];
   const TAG_SIZES = [0.008, 0.018, 0.036];
   const TAG_MAX_POINTS = 4000, TAG_MAX_BYTES = 60000;
@@ -897,10 +902,13 @@ body.canvas-on main { display: none; }
   let tagStrokes = [], tagColor = TAG_COLORS[1], tagSize = TAG_SIZES[1], tagRaf = false;
 
   TAG_FX.forEach(d => {
-    const b = document.createElement('button'); b.innerHTML = `<span>${d.l}</span><span class="sub">${d.s}</span>`;
+    const b = document.createElement('button'); b.textContent = d.l; b.className = d.fx ? 'shot' : d.melt ? 'melt' : '';
     onTap(b, () => {
-      if(d.fx) { socket.send({type:'trig',k:'tag',fx:d.fx,q:state.quant}); showToast(d.l); }
-      else { state.tag[d.mode] = !state.tag[d.mode]; socket.sendState(state); renderTagUI(); }
+      if(d.fx) { socket.send({type:'trig',k:'tag',fx:d.fx,q:state.quant}); showToast(d.l); return; }
+      state.tag[d.mode] = !state.tag[d.mode];
+      // Only one way of melting into the picture at a time.
+      if(d.melt && state.tag[d.mode]) TAG_BLENDS.forEach(m => { if(m !== d.mode) state.tag[m] = false; });
+      socket.sendState(state); renderTagUI();
     });
     el('tag-fx').appendChild(b); tagBtns.push(b);
   });

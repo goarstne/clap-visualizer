@@ -7,7 +7,7 @@ Extends [PROTOCOL.md](PROTOCOL.md). Send compact JSON with `type` first. The iPa
 Send full state; last writer wins. Unknown fields survive normalization; missing fields use defaults. Legacy `preset`, `gain`, `brightness` map to `deckA`, `fx.gain`, `fx.bright`.
 
 ```json
-{"type":"state","v":2,"deckA":"<preset>","deckB":"<preset>","xfade":0,"blend":2,"quant":"bar","autoBars":8,"random":true,"locked":false,"fx":{},"sync":{},"scenes":[null,null,null,null,null,null,null,null],"pool":"all","favs":[],"img":[],"stems":{"drums":true,"bass":true,"melody":true},"tag":{"pulse":false,"drip":false,"neon":false,"glitch":false,"rainbow":false}}
+{"type":"state","v":2,"deckA":"<preset>","deckB":"<preset>","xfade":0,"blend":2,"quant":"bar","autoBars":8,"random":true,"locked":false,"fx":{},"sync":{},"scenes":[null,null,null,null,null,null,null,null],"pool":"all","favs":[],"img":[],"stems":{"drums":true,"bass":true,"melody":true},"tag":{"pulse":false,"drip":false,"neon":false,"glitch":false,"rainbow":false,"zoom":false,"spin":false,"drift":false,"wave":false,"trail":false,"add":false,"diff":false,"melt":false}}
 ```
 
 `xfade` ranges from 0 (A) to 1 (B). `blend` is transition time in seconds (0..10). `autoBars` is 0 (off) or 4/8/16/32; automatic changes load the less visible deck and swap. `locked` prevents auto changes. `pool` is `all`, `milk`, `viz` or `favs`; an empty pool falls back to all. `favs` holds up to 200 names. Eight scenes contain null or `{deckA,deckB,xfade,fx,sync,img}`; images are optional, stems are excluded.
@@ -93,7 +93,23 @@ The remote's canvas switch replaces the dashboard with a 16:9 wall. Strokes are 
 
 `tag` is transient and not stored. `c` is `#rrggbb`, `w` the line width relative to the picture height (0.003..0.08), `p` a flat list of x,y pairs in 0..1000 with the origin at the top left. The remote keeps a tag under 4000 points and thins it out to stay below 60 kB; displays clamp everything and keep the six newest tags. Displays answer every change with `tags` (number on the wall).
 
-The eight buttons above the wall: `write` replays the strokes over 1.4 s, `burst` scatters the points and reassembles them (0.9 s) and `wipe` fades all tags out (0.6 s) — these are quantized triggers with pending keys `tag<fx>`. `pulse` (scale on the host beat, bass level when stopped), `drip` (paint runs grow over 3.5 s), `neon` (glow with white core instead of black outline), `glitch` (jumping cyan/magenta copies) and `rainbow` (cycling colours) are booleans in `state.tag`. Scenes do not include them.
+Sixteen buttons sit above the wall in two rows. `write` replays the strokes over 1.4 s, `burst` scatters the points and reassembles them (0.9 s) and `wipe` fades all tags out (0.6 s) — these are quantized triggers with pending keys `tag<fx>`. Everything else is a boolean in `state.tag`; scenes do not include them.
+
+| Mode | Effect |
+|---|---|
+| `pulse` | Scale on the host beat, bass level when stopped |
+| `drip` | Paint runs grow over 3.5 s |
+| `neon` | Glow with white core instead of black outline |
+| `glitch` | Jumping cyan/magenta copies |
+| `rainbow` | Cycling colours |
+| `zoom` | Breathes in and out, one cycle per four beats |
+| `spin` | Rotates around the tag's centre, one turn per eight beats, alternating direction per tag |
+| `drift` | Wanders across the picture |
+| `wave` | Bends the strokes |
+| `trail` | The layer fades instead of clearing, so moving tags leave a tail |
+| `add`, `diff`, `melt` | How the tag blends with the picture: add light, difference, or bend and tint the picture underneath. The remote keeps at most one enabled; `melt` wins over `diff` over `add` |
+
+Movement runs on host beats while the transport plays and at 120 BPM otherwise.
 
 ## Images, layout and rendering
 
@@ -125,7 +141,8 @@ fx.setImage(i, image); // null clears layer
 fx.destroy();
 const tags = VJTags.create();
 tags.add(strokes, now); tags.trigger('burst', now);
-if (tags.render(now, state.tag, pulse)) params.tag = tags.canvas; // 1280×720, transparent
+if (tags.render(now, state.tag, pulse, clock)) params.tag = tags.canvas; // 1280×720, transparent; clock in beats
+params.tagBlend = 0; // 1 add, 2 difference, 3 melt
 ```
 
 `ShaderViz.names` contains seven `◆ ` presets: Spektrum, Oszilloskop, Kreis, Tunnel, Plasma, Sterne, Gitter. A 1024-sample FFT provides a 512×2 texture (log spectrum 30 Hz..16 kHz, waveform). Camera controls use zoom/rotation/warp/displacement. dt is already speed-scaled.
