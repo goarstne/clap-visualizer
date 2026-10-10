@@ -127,7 +127,7 @@ std::string number(double value) {
 }
 using Clock=std::chrono::steady_clock;
 int configuredPort() {
-    if (const char *env=std::getenv("VSTVIS_PORT")) { char *end=nullptr; long n=std::strtol(env,&end,10); if (*env && !*end && n>0 && n<=65535) return n; std::fprintf(stderr,"VST Visualizer: invalid VSTVIS_PORT; using 8765\n"); }
+    if (const char *env=std::getenv("VSTVIS_PORT")) { char *end=nullptr; long n=std::strtol(env,&end,10); if (*env && !*end && n>0 && n<=65535) return n; std::fprintf(stderr,"CLAP Visualizer: invalid VSTVIS_PORT; using 8765\n"); }
     return 8765;
 }
 // One line of the plugin window; rows with a url are clickable links.
@@ -135,9 +135,9 @@ struct Row { std::string text, url; };
 constexpr int GuiWidth=520, GuiLine=26, GuiPad=16;
 std::vector<Row> guiLayout(int port) {
     std::string p=":"+std::to_string(port);
-    std::vector<Row> rows{{"VST Visualizer",""},{"",""},{"Dieser Rechner",""},
+    std::vector<Row> rows{{"CLAP Visualizer",""},{"",""},{"This computer",""},
         {"Display: http://localhost"+p+"/","http://localhost"+p+"/"},
-        {"Fernbedienung: http://localhost"+p+"/remote.html","http://localhost"+p+"/remote.html"}};
+        {"Remote: http://localhost"+p+"/remote.html","http://localhost"+p+"/remote.html"}};
     ifaddrs *list=nullptr;
     if (getifaddrs(&list)) return rows;
     for (ifaddrs *i=list; i && rows.size()<17; i=i->ifa_next) {
@@ -148,9 +148,9 @@ std::vector<Row> guiLayout(int port) {
         char ip[INET_ADDRSTRLEN];
         if (!inet_ntop(AF_INET,&reinterpret_cast<sockaddr_in *>(i->ifa_addr)->sin_addr,ip,sizeof(ip))) continue;
         std::string base=std::string("http://")+ip+p;
-        rows.push_back({"Im Netzwerk ("+name+")",""});
+        rows.push_back({"On the network ("+name+")",""});
         rows.push_back({"Display: "+base+"/",base+"/"});
-        rows.push_back({"Fernbedienung (Tablet): "+base+"/remote.html",base+"/remote.html"});
+        rows.push_back({"Tablet remote: "+base+"/remote.html",base+"/remote.html"});
     }
     freeifaddrs(list);
     return rows;
@@ -188,7 +188,7 @@ struct Plugin {
         const char *argv[]={"setsid","-f","xdg-open",url.c_str(),nullptr};
         pid_t pid;
         if (posix_spawnp(&pid,"setsid",nullptr,nullptr,const_cast<char *const *>(argv),environ)==0) waitpid(pid,nullptr,0);
-        else std::fprintf(stderr,"VST Visualizer: cannot open %s\n",url.c_str());
+        else std::fprintf(stderr,"CLAP Visualizer: cannot open %s\n",url.c_str());
     }
     // Runs on its own thread with its own X connection; xcb reports errors as events instead of exiting the host.
     void gui() {
@@ -369,12 +369,12 @@ struct Plugin {
     }
     void server() {
         int listener=socket(AF_INET,SOCK_STREAM|SOCK_NONBLOCK|SOCK_CLOEXEC,0);
-        if (listener<0) { std::perror("VST Visualizer socket"); return; }
+        if (listener<0) { std::perror("CLAP Visualizer socket"); return; }
         int reuse=1; setsockopt(listener,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));
         int port=configuredPort();
         sockaddr_in address{}; address.sin_family=AF_INET; address.sin_addr.s_addr=htonl(INADDR_ANY); address.sin_port=htons(port);
-        if (bind(listener,reinterpret_cast<sockaddr *>(&address),sizeof(address)) || listen(listener,16)) { std::perror("VST Visualizer bind/listen (audio continues)"); close(listener); listenPort=-port; return; }
-        std::fprintf(stderr,"VST Visualizer: listening on 0.0.0.0:%d\n",port);
+        if (bind(listener,reinterpret_cast<sockaddr *>(&address),sizeof(address)) || listen(listener,16)) { std::perror("CLAP Visualizer bind/listen (audio continues)"); close(listener); listenPort=-port; return; }
+        std::fprintf(stderr,"CLAP Visualizer: listening on 0.0.0.0:%d\n",port);
         listenPort=port;
         std::vector<Client> clients;
         uint64_t seenVersion;
@@ -464,14 +464,14 @@ struct Plugin {
                     if (fd>=0) { if (clients.size()>=32) close(fd); else { clients.emplace_back(); clients.back().fd=fd; } }
                 }
             }
-        } catch (...) { std::fprintf(stderr,"VST Visualizer: server stopped after resource failure; audio continues\n"); }
+        } catch (...) { std::fprintf(stderr,"CLAP Visualizer: server stopped after resource failure; audio continues\n"); }
         for (Client &c:clients) { close(c.fd); if (c.file>=0) close(c.file); }
         close(listener);
     }
 };
 Plugin &self(const clap_plugin_t *p) { return *static_cast<Plugin *>(p->plugin_data); }
 const char *features[]={CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,CLAP_PLUGIN_FEATURE_ANALYZER,CLAP_PLUGIN_FEATURE_STEREO,nullptr};
-const clap_plugin_descriptor_t descriptor={CLAP_VERSION,"org.vstvisualizer.visualizer","VST Visualizer","VST Visualizer","","","","1.0.0","Stereo passthrough with browser visualization",features};
+const clap_plugin_descriptor_t descriptor={CLAP_VERSION,"org.vstvisualizer.visualizer","CLAP Visualizer","CLAP Visualizer","","","","1.0.0","Stereo passthrough with browser visualization",features};
 bool init(const clap_plugin_t *p) {
     auto &s=self(p);
     try {
@@ -480,7 +480,7 @@ bool init(const clap_plugin_t *p) {
         if (const char *env=std::getenv("VSTVIS_WEB_DIR")) root=env;
         else { Dl_info info{}; if (dladdr(reinterpret_cast<void *>(&init),&info) && info.dli_fname) {
             char resolved[4096]; std::string path=realpath(info.dli_fname,resolved) ? resolved : info.dli_fname;
-            root=path.substr(0,path.find_last_of('/'))+"/vstvisualizer.web";
+            root=path.substr(0,path.find_last_of('/'))+"/clapvisualizer.web";
         } }
         char resolved[4096]; if (realpath(root.c_str(),resolved)) s.webRoot=resolved;
         return true;
@@ -488,7 +488,7 @@ bool init(const clap_plugin_t *p) {
 }
 bool activate(const clap_plugin_t *p,double rate,uint32_t,uint32_t) {
     auto &s=self(p); if (!std::isfinite(rate) || rate<=0) return false; s.sampleRate=rate;
-    if (!s.worker.joinable()) try { s.worker=std::thread([&s]{s.server();}); } catch (...) { std::fprintf(stderr,"VST Visualizer: cannot start server; audio continues\n"); }
+    if (!s.worker.joinable()) try { s.worker=std::thread([&s]{s.server();}); } catch (...) { std::fprintf(stderr,"CLAP Visualizer: cannot start server; audio continues\n"); }
     return true;
 }
 void transport(Plugin &s,const clap_event_transport_t *t) {

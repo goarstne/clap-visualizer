@@ -120,7 +120,7 @@ def main():
         with socket.socket() as reservation:
             reservation.bind(('127.0.0.1', 0))
             port = reservation.getsockname()[1]
-        web = tmp / 'vstvisualizer.web'
+        web = tmp / 'clapvisualizer.web'
         web.mkdir()
         (web / 'index.html').write_text('<!doctype html><title>selftest</title>')
         (web / 'remote.html').write_text('<!doctype html><title>remote</title>')
@@ -128,8 +128,8 @@ def main():
         (web / 'photo.jpg').write_bytes(b'\xff\xd8\xff')
         (web / 'large.wasm').write_bytes(b'x' * 400000)
         (web / 'outside').symlink_to('/etc/passwd')
-        library = tmp / 'vstvisualizer.clap'
-        shutil.copy2(ROOT / 'build/vstvisualizer.clap', library)
+        library = tmp / 'clapvisualizer.clap'
+        shutil.copy2(ROOT / 'build/clapvisualizer.clap', library)
         env = os.environ.copy()
         env.pop('VSTVIS_WEB_DIR', None)  # Exercise dladdr-relative default.
         env.update(VSTVIS_PORT=str(port), VSTVIS_STATE_FILE=str(tmp / 'state.json'))

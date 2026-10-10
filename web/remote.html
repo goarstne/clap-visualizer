@@ -105,7 +105,9 @@ main { flex: 1; padding: 6px; gap: 6px; overflow: hidden; display: grid; min-hei
 #pending { display: none; color: var(--warn); font-size: 11px; white-space: nowrap; }
 
 /* AUTO / BLEND / QUANT */
-.auto-row { display: flex; gap: 4px; font-size: 11px; align-items: center; flex-wrap: wrap; }
+.auto-row { display: flex; gap: 4px; font-size: 11px; align-items: center; white-space: nowrap; }
+.card-header span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.card-header { gap: 6px; }
 .auto-row button, .auto-row select { min-height: 40px; font-size: 11px; padding: 0 4px; }
 .auto-row select { flex: 1; min-width: 58px; }
 
@@ -262,7 +264,7 @@ main { flex: 1; padding: 6px; gap: 6px; overflow: hidden; display: grid; min-hei
             <button id="btn-random">🎲 AN</button>
             <button id="btn-lock">🔓 Entsperrt</button>
             <span>Blend:</span>
-            <select id="sel-blend" style="max-width:50px;">
+            <select id="sel-blend" style="flex:0 0 46px; min-width:46px;">
               <option value="0">0s</option><option value="0.5">.5s</option><option value="1">1s</option><option value="2" selected>2s</option><option value="4">4s</option><option value="8">8s</option>
             </select>
           </div>
@@ -295,7 +297,7 @@ main { flex: 1; padding: 6px; gap: 6px; overflow: hidden; display: grid; min-hei
     <!-- COL 2: Perf & Scenes -->
     <div class="col scroll-col">
       <div class="card">
-        <div class="card-header"><span>Bilder reinschießen</span><span>🌀 Spin · 🔍 Zoom · ⚡ Blitz</span></div>
+        <div class="card-header"><span>Bild-Schüsse</span><span>🌀 Spin · 🔍 Zoom · ⚡ Blitz</span></div>
         <div class="card-body">
           <div class="grid-5" id="img-shots"></div>
         </div>

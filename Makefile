@@ -9,9 +9,9 @@ HEADERS := $(shell find third_party/clap/include -name '*.h')
 PICTURES ?= Pictues
 
 .PHONY: all test install clean pictures
-all: build/vstvisualizer.clap tools/fakehost tools/guitest
+all: build/clapvisualizer.clap tools/fakehost tools/guitest
 
-build/vstvisualizer.clap: plugin/vstvisualizer.cpp $(HEADERS)
+build/clapvisualizer.clap: plugin/clapvisualizer.cpp $(HEADERS)
 	mkdir -p build
 	$(CXX) $(CPPFLAGS) $(shell pkg-config --cflags xcb cairo) $(CXXFLAGS) -fPIC -fvisibility=hidden -shared $< -o $@ $(LDFLAGS) $(LDLIBS) $(shell pkg-config --libs xcb cairo)
 
@@ -24,7 +24,7 @@ tools/guitest: tools/guitest.cpp $(HEADERS)
 test: all
 	python3 tools/selftest.py
 	node tools/webtest.js
-	tools/guitest build/vstvisualizer.clap
+	tools/guitest build/clapvisualizer.clap
 
 # Copies the images into the web directory and writes the list the pages load.
 pictures:
@@ -34,9 +34,9 @@ pictures:
 
 install: all pictures
 	install -d "$(CLAP_DIR)"
-	install -m 755 build/vstvisualizer.clap "$(CLAP_DIR)/vstvisualizer.clap"
-	mkdir -p "$(CLAP_DIR)/vstvisualizer.web"
-	cp -a web/. "$(CLAP_DIR)/vstvisualizer.web/"
+	install -m 755 build/clapvisualizer.clap "$(CLAP_DIR)/clapvisualizer.clap"
+	mkdir -p "$(CLAP_DIR)/clapvisualizer.web"
+	cp -a web/. "$(CLAP_DIR)/clapvisualizer.web/"
 
 clean:
 	rm -rf build tools/fakehost tools/guitest

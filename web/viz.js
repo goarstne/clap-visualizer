@@ -1,5 +1,5 @@
 /**
- * Shader visualisations for VST Visualizer: a second, small engine next to butterchurn.
+ * Shader visualisations for CLAP Visualizer: a second, small engine next to butterchurn.
  * API: window.ShaderViz = { names, analyze(wave, dt, rate), create() }
  * Spec: docs/CONTROL.md, section "Shader-Engine".
  *

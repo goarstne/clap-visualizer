@@ -1,5 +1,5 @@
 /**
- * Shared WebSocket client for VST Visualizer (display and remote)
+ * Shared WebSocket client for CLAP Visualizer (display and remote)
  * Protocol: docs/PROTOCOL.md
  */
 

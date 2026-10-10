@@ -6,3 +6,10 @@ node_modules/
 tools/fakehost
 tools/guitest
 web/pictures/
+
+# Personal image folders and generated recordings
+/Pictues/
+/Pictures/
+/pictures/
+/demo/*.mp4
+*.f32

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <link rel="icon" href="data:,">
+  <title>CLAP Visualizer - Demo</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { width: 1920px; height: 1080px; overflow: hidden; background: #05070b; color: #f0f6fc; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    #left { position: absolute; left: 8px; top: 8px; width: 800px; }
+    h1 { font-size: 26px; letter-spacing: 0.02em; height: 46px; display: flex; align-items: center; gap: 12px; }
+    h1 span { color: #38bdf8; }
+    h1 small { font-size: 14px; font-weight: 500; color: #8b949e; }
+    iframe { border: 0; display: block; background: #000; }
+    #display { width: 800px; height: 450px; border: 1px solid #262f3d; border-radius: 8px; }
+    .label { font-size: 12px; font-weight: 700; color: #8b949e; text-transform: uppercase; letter-spacing: 0.08em; margin: 10px 0 6px; }
+    #step { font-size: 40px; font-weight: 800; line-height: 1.1; min-height: 50px; color: #38bdf8; }
+    #text { font-size: 23px; line-height: 1.35; color: #e2e8f0; margin-top: 10px; min-height: 96px; }
+    #steps { list-style: none; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; margin-top: 16px; font-size: 17px; color: #545d68; }
+    #steps li.done { color: #8b949e; }
+    #steps li.now { color: #f0f6fc; font-weight: 700; }
+    #steps li::before { content: '○ '; }
+    #steps li.done::before { content: '● '; color: #22c55e; }
+    #steps li.now::before { content: '▶ '; color: #38bdf8; }
+    #remote { position: absolute; left: 816px; top: 8px; width: 1096px; height: 1064px; border: 1px solid #262f3d; border-radius: 8px; }
+    .finger { position: absolute; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%; border: 3px solid #fff; background: rgba(250, 204, 21, 0.45); box-shadow: 0 0 14px rgba(250, 204, 21, 0.9); pointer-events: none; z-index: 10; opacity: 0; transition: opacity 0.12s; }
+    .finger.on { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div id="left">
+    <h1>CLAP <span>Visualizer</span> <small>CLAP plugin · Browser display · Tablet remote</small></h1>
+    <iframe id="display" src="/?scale=1"></iframe>
+    <div class="label">Live display · projector or second screen</div>
+    <div id="step"></div>
+    <div id="text"></div>
+    <ol id="steps"></ol>
+  </div>
+  <iframe id="remote" src="/remote.html"></iframe>
+  <div class="finger"></div><div class="finger"></div><div class="finger"></div>
+  <script>
+    const fingers = [...document.querySelectorAll('.finger')];
+    window.showFingers = points => fingers.forEach((f, i) => {
+      f.classList.toggle('on', !!points[i]);
+      if (points[i]) { f.style.left = points[i].x + 'px'; f.style.top = points[i].y + 'px'; }
+    });
+    window.setSteps = names => { document.getElementById('steps').innerHTML = names.map(n => `<li>${n}</li>`).join(''); };
+    window.caption = (index, title, text) => {
+      document.getElementById('step').textContent = title; document.getElementById('text').textContent = text;
+      [...document.querySelectorAll('#steps li')].forEach((li, i) => { li.className = i < index ? 'done' : i === index ? 'now' : ''; });
+    };
+  </script>
+</body>
+</html>

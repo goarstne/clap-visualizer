@@ -1,3 +1,4 @@
+#include <vector>
 #include <clap/clap.h>
 #include <algorithm>
 #include <array>
@@ -35,14 +36,14 @@ clap_ostream_t output(Stream &s) {
 }
 int main(int argc,char **argv) {
     double duration=argc>1 ? std::stod(argv[1]) : 0;
-    const char *path=argc>2 ? argv[2] : "build/vstvisualizer.clap";
+    const char *path=argc>2 ? argv[2] : "build/clapvisualizer.clap";
     void *library=dlopen(path,RTLD_NOW|RTLD_LOCAL);
     if (!library) { std::cerr<<dlerror()<<'\n'; return 1; }
     const auto *entry=static_cast<const clap_plugin_entry_t *>(dlsym(library,"clap_entry"));
     assert(entry && clap_version_is_compatible(entry->clap_version) && entry->init(path));
     const auto *factory=static_cast<const clap_plugin_factory_t *>(entry->get_factory(CLAP_PLUGIN_FACTORY_ID));
     assert(factory && factory->get_plugin_count(factory)==1);
-    clap_host_t host{CLAP_VERSION,nullptr,"fakehost","VST Visualizer","","1.0",
+    clap_host_t host{CLAP_VERSION,nullptr,"fakehost","CLAP Visualizer","","1.0",
         [](const clap_host_t *,const char *)->const void *{return nullptr;},
         [](const clap_host_t *){},[](const clap_host_t *){},[](const clap_host_t *){callback=true;}};
     const clap_plugin_t *plugin=factory->create_plugin(factory,&host,factory->get_plugin_descriptor(factory,0)->id);
@@ -88,9 +89,19 @@ int main(int argc,char **argv) {
         clap_event_transport_t transport{}; transport.header.size=sizeof(transport); transport.header.type=CLAP_EVENT_TRANSPORT;
         transport.flags=CLAP_TRANSPORT_HAS_TEMPO|CLAP_TRANSPORT_HAS_BEATS_TIMELINE|CLAP_TRANSPORT_HAS_TIME_SIGNATURE|CLAP_TRANSPORT_IS_PLAYING;
         transport.tempo=120; transport.tsig_num=transport.tsig_denom=4; proc.transport=&transport;
+        // Optional real programme material instead of the test kick: raw stereo float32 LE at 48 kHz, looped.
+        std::vector<float> track;
+        if (const char *file=std::getenv("VSTVIS_FAKE_AUDIO")) {
+            std::ifstream in(file,std::ios::binary); assert(in && "cannot read demo audio");
+            std::string bytes{std::istreambuf_iterator<char>(in),{}};
+            assert(!bytes.empty() && bytes.size()%(2*sizeof(float))==0 && "expected stereo float32 audio");
+            track.resize(bytes.size()/sizeof(float)/2*2); std::memcpy(track.data(),bytes.data(),track.size()*sizeof(float));
+        }
+        std::cerr<<"fakehost: audio running\n"<<std::flush;
         const auto start=std::chrono::steady_clock::now(); uint64_t samples=0;
         while (!interrupted && (duration<=0 || samples/rate<duration)) {
-            for (int i=0;i<block;++i) {
+            for (int i=0;i<block && !track.empty();++i) { size_t at=(samples+i)%(track.size()/2)*2; left[i]=track[at]; right[i]=track[at+1]; }
+            for (int i=0;i<block && track.empty();++i) {
                 double time=(samples+i)/rate, quarter=std::fmod(time,0.5);
                 double kick=quarter<0.15 ? 0.8*std::exp(-quarter*35)*std::cos(2*pi*(55*quarter+3*(1-std::exp(-quarter*30)))) : 0;
                 left[i]=kick+0.035*std::sin(2*pi*220*time);

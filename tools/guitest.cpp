@@ -15,7 +15,7 @@
 #include <xcb/xcb.h>
 
 int main(int argc,char **argv) {
-    const char *path=argc>1 ? argv[1] : "build/vstvisualizer.clap";
+    const char *path=argc>1 ? argv[1] : "build/clapvisualizer.clap";
     char dir[]="/tmp/vstvis-guitest-XXXXXX"; assert(mkdtemp(dir));
     std::string stub=std::string(dir)+"/xdg-open", result=std::string(dir)+"/opened";
     { std::ofstream f(stub); f<<"#!/bin/sh\nprintf '%s' \"$1\" > '"<<result<<"'\n"; }

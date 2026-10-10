@@ -1,5 +1,5 @@
 /**
- * WebGL2 post-processing for VST Visualizer.
+ * WebGL2 post-processing for CLAP Visualizer.
  * API: window.PostFX.create(canvas) -> {resize, render, destroy} | null
  * Spec: docs/CONTROL.md, section "PostFX-API".
  *

@@ -1,74 +1,45 @@
-# Schnittstelle Plugin <-> Web
+# Plugin ↔ browser protocol
 
-Verbindlich für `plugin/` (C++) und `web/` (Browser). Änderungen nur über den
-koordinierenden Agenten.
-
-## Überblick
-
-- Das CLAP-Plugin sitzt auf dem REAPER-Masterbus, reicht Audio unverändert durch
-  und betreibt einen HTTP+WebSocket-Server auf `0.0.0.0:8765`
-  (überschreibbar mit Umgebungsvariable `VSTVIS_PORT`).
-- Visuals werden im Browser gerendert (Display-Seite, butterchurn/WebGL).
-  Die Remote-Seite auf Handy/Tablet steuert sie live.
-- Der Server parst kein JSON. Er ist ein Relay plus Sender für Audio/Transport.
+The Linux CLAP effect passes audio through unchanged and serves HTTP and WebSocket on `0.0.0.0:8765`. Override the port with `VSTVIS_PORT`. Visuals render in the browser; the tablet remote sends control messages. The server relays text without parsing JSON.
 
 ## HTTP
 
-- `GET /` -> `index.html` (Display), `GET /remote.html` (Fernbedienung),
-  sonst statische Dateien aus dem Web-Verzeichnis.
-- Web-Verzeichnis: `VSTVIS_WEB_DIR`, sonst `vstvisualizer.web/` neben der
-  geladenen `.clap`-Datei (per `dladdr`).
-- Nur `GET`. Pfade mit `..` oder außerhalb des Web-Verzeichnisses -> 403/404.
-- Content-Types mindestens: html, js, css, json, svg, png, ico, wasm.
+- `GET /`: `index.html` (display); `GET /remote.html`: controller.
+- Other GET paths serve files from `VSTVIS_WEB_DIR`, or the `clapvisualizer.web/` directory beside the loaded plugin, resolved using `dladdr`.
+- Paths containing `..` or resolving outside the web directory are rejected. Only GET is supported.
+- Supported MIME types include HTML, JavaScript, CSS, JSON, SVG, PNG, JPEG, WebP, ICO and WASM.
 
-## WebSocket `ws://<host>:8765/ws`
+## WebSocket `/ws`
 
-### Client -> Server (Text-Frames)
-
-| Frame | Verhalten des Servers |
+| Client text frame | Server action |
 |---|---|
-| exakt `hello display` | Client erhält ab jetzt binäre Audioframes |
-| exakt `hello remote` | Client erhält keine Audioframes (Standard) |
-| beginnt mit `{"type":"state"` | wird als aktueller State gespeichert (max. 64 KiB) und an alle **anderen** Clients gesendet |
-| alles andere | wird unverändert an alle **anderen** Clients gesendet, nicht gespeichert (einmalige Aktionen) |
+| Exact `hello display` | Enable binary audio frames for this client |
+| Exact `hello remote` | Disable binary audio frames (also the default) |
+| Starts with `{"type":"state"` | Store as current state (maximum 64 KiB); relay to all other clients |
+| Other text | Relay to all other clients without storing |
 
-Direkt nach dem WS-Handshake sendet der Server den gespeicherten State (falls
-vorhanden) als Text-Frame an den neuen Client. Der State wird zusätzlich über
-die CLAP-State-Extension im REAPER-Projekt gespeichert/geladen.
-
-### Server -> Client
-
-**Transport** (Text, JSON, ~20 Hz, an alle Clients):
+After the handshake, a new client receives the stored state first, if present. The CLAP state extension saves and restores the same opaque string in the host project. All clients receive transport messages at approximately 20 Hz:
 
 ```json
-{"type":"transport","bpm":120.0,"playing":true,"beat":17.25,
- "tsNum":4,"tsDen":4,"rms":0.21,"peak":0.63,"sampleRate":48000}
+{"type":"transport","bpm":120.0,"playing":true,"beat":17.25,"tsNum":4,"tsDen":4,"rms":0.21,"peak":0.63,"sampleRate":48000}
 ```
 
-- `beat`: Songposition in Viertelnoten (aus dem Host-Transport, fortlaufend).
-  Ohne Host-Transport: `bpm` 0, `playing` false, `beat` 0.
-- `rms`/`peak`: linear 0..1 über das letzte Sendeintervall (Stereo-Maximum).
+`beat` is host song position in quarter notes. With no host transport, BPM and beat are zero and playing is false. RMS/peak are linear levels over the last send interval, using the stereo maximum.
 
-**Audio** (Binär, ~60 Hz, nur an `display`-Clients), little-endian:
+Display clients also receive binary audio at approximately 60 Hz, little-endian:
 
-| Offset | Typ | Inhalt |
+| Offset | Type | Meaning |
 |---|---|---|
-| 0 | u8 | Frame-Typ = `1` |
-| 1 | u8 | Flags, Bit 0 = playing |
-| 2 | u16 | N = Samples pro Kanal (1024) |
-| 4 | f32 | bpm |
-| 8 | f64 | beat (Viertelnoten) |
-| 16 | u8[N] | linker Kanal, jüngste N Samples, 128 = Null (`128 + s*127`, geclippt) |
-| 16+N | u8[N] | rechter Kanal, gleiches Format |
+| 0 | u8 | Frame type 1 |
+| 1 | u8 | Flags; bit 0 means playing |
+| 2 | u16 | Samples per channel N = 1024 |
+| 4 | f32 | BPM |
+| 8 | f64 | Beat position |
+| 16 | u8[N] | Latest left samples: clipped `128 + sample * 127` |
+| 16 + N | u8[N] | Latest right samples, same encoding |
 
-Mono-Eingang: beide Kanäle identisch.
+Mono input is duplicated. Text messages must be complete, masked, valid UTF-8 WebSocket frames; fragmented and oversized frames are rejected. Ping/Pong and Close are supported.
 
-## State (Konvention der Web-Seite, für den Server opak)
+## State convention
 
-```json
-{"type":"state","preset":"<Name>","blend":2.0,"autoBars":8,
- "random":true,"locked":false}
-```
-
-Felder dürfen von `web/` erweitert werden. Der Sender schickt immer den
-vollständigen State (letzter Schreiber gewinnt).
+State messages are compact JSON with `type` first (`JSON.stringify`). Send the complete state: the last writer wins. The server does not interpret the fields. Browser state version 2, controls and engine behavior are described in [CONTROL.md](CONTROL.md).

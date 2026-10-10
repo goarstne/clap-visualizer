@@ -1,6 +1,6 @@
 // Touch test of display + remote in an iPad 10 emulation (both orientations), with trusted touch input.
 // Needs a running server and Playwright with a Chromium binary:
-//   VSTVIS_PORT=18770 VSTVIS_WEB_DIR=$PWD/web tools/fakehost 0 build/vstvisualizer.clap &
+//   VSTVIS_PORT=18770 VSTVIS_WEB_DIR=$PWD/web tools/fakehost 0 build/clapvisualizer.clap &
 //   PW=<dir containing node_modules/playwright> node tools/touchtest.js <screenshot dir>
 const { chromium } = require(process.env.PW + '/node_modules/playwright');
 const out = process.argv[2], url = 'http://localhost:18770';
