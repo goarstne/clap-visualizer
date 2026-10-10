@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<link rel="icon" href="data:,">
+<title>CLAP Visualizer</title>
+<style>
+*{box-sizing:border-box}html,body{height:100%;margin:0}
+body{background:#070b12;color:#eff6ff;font:18px system-ui,sans-serif;display:flex;flex-direction:column}
+main{margin:auto;padding:24px 16px;width:100%;max-width:560px;text-align:center}
+h1{font-size:30px;margin:0 0 6px}h1 span{color:#38bdf8}p{color:#9cacbf;margin:0 0 26px}
+a{display:block;margin:14px 0;padding:22px 18px;border:1px solid #2b3a4d;border-radius:14px;background:#111a26;color:inherit;text-decoration:none;font-size:20px;font-weight:600}
+a small{display:block;margin-top:6px;color:#9cacbf;font-size:14px;font-weight:400}
+a:active{background:#1b2a3d;border-color:#38bdf8}
+iframe{border:0;width:100%;display:block}
+#display{aspect-ratio:16/9;max-height:45vh;background:#000}#remote{flex:1;min-height:0}
+</style>
+<main>
+  <h1>CLAP <span>Visualizer</span></h1>
+  <p>What do you want to use on this device?</p>
+  <a href="remote.html">Remote only<small>Control the visuals shown on another screen</small></a>
+  <a href="?both">Display + remote<small>Watch the visuals here and control them below</small></a>
+</main>
+<script>
+// "Both" stacks the two pages: the display on top, the remote underneath.
+if (new URLSearchParams(location.search).has('both')) {
+  document.body.innerHTML = '<iframe id="display" src="index.html" title="Display" allow="fullscreen"></iframe><iframe id="remote" src="remote.html" title="Remote"></iframe>';
+}
+</script>
+</html>

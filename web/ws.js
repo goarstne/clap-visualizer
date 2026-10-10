@@ -103,6 +103,7 @@
           const hello = this.role === 'display' ? 'hello display' : 'hello remote';
           this.ws.send(hello);
           if (this.build !== null) this.send({ type: 'build', sig: this.build });
+          if (this.listening) this.ws.send('hello listen');
         };
 
         this.ws.onmessage = (event) => {
@@ -148,6 +149,7 @@
           } else if (parsed.type === 'state') {
             this.onState(parsed);
           } else if (parsed.type === 'transport') {
+            this.sampleRate = parsed.sampleRate;
             this.onTransport(parsed);
           } else {
             this.onMessage(parsed);
@@ -168,6 +170,7 @@
 
         const view = new DataView(data);
         const frameType = view.getUint8(0);
+        if (frameType === 2) { this.playPcm(view); return; }
         if (frameType !== 1) return;
 
         const flags = view.getUint8(1);
@@ -192,6 +195,38 @@
           right
         });
       }
+    }
+
+    // Plays the host audio on this device. Call it from a tap, or the browser keeps the sound muted.
+    listen(on) {
+      this.listening = !!on;
+      // iOS plays Web Audio as "ambient" sound, which silent mode mutes; music playback is not.
+      if (navigator.audioSession) navigator.audioSession.type = 'playback';
+      if (on && !this.audioContext) {
+        const Context = window.AudioContext || window.webkitAudioContext;
+        try { this.audioContext = new Context({ sampleRate: this.sampleRate || 48000 }); }
+        catch (e) { this.audioContext = new Context(); }
+      }
+      if (this.audioContext) this.audioContext[on ? 'resume' : 'suspend']();
+      this.send(on ? 'hello listen' : 'hello mute');
+      return this.listening;
+    }
+
+    // Frame type 2: u8 type, u8 channels (2), u16 reserved, u32 sample rate, then interleaved 16-bit samples.
+    playPcm(view) {
+      const context = this.audioContext, frames = (view.byteLength - 8) >> 2;
+      if (!this.listening || !context || frames < 1) return;
+      const buffer = context.createBuffer(2, frames, view.getUint32(4, true));
+      for (let channel = 0; channel < 2; channel++) {
+        const samples = buffer.getChannelData(channel);
+        for (let i = 0; i < frames; i++) samples[i] = view.getInt16(8 + i * 4 + channel * 2, true) / 32768;
+      }
+      const source = context.createBufferSource();
+      source.buffer = buffer; source.connect(context.destination);
+      // ponytail: fixed 150 ms buffer, restarted after a gap or pile-up; a resampling worklet would hide clock drift.
+      const now = context.currentTime;
+      if (!(this.playAt > now + 0.02 && this.playAt < now + 1)) this.playAt = now + 0.15;
+      source.start(this.playAt); this.playAt += buffer.duration;
     }
 
     sendState(state) {

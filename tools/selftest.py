@@ -18,11 +18,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class WS:
-    def __init__(self, port):
+    def __init__(self, port, origin=None):
         self.sock = socket.create_connection(('127.0.0.1', port), timeout=2)
         self.buffer = b''
         key = base64.b64encode(os.urandom(16)).decode()
         self.sock.sendall((f'GET /ws HTTP/1.1\r\nHost: localhost\r\n'
+                           + (f'Origin: {origin}\r\n' if origin else '') +
                            f'Upgrade: WebSocket\r\nConnection: keep-alive, Upgrade\r\n'
                            f'Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: {key}\r\n\r\n').encode())
         while b'\r\n\r\n' not in self.buffer:
@@ -169,6 +170,19 @@ def main():
             for _ in range(3):
                 op, payload = remote.recv()
                 assert op == 1, 'remote received audio'
+            clients.append(WS(port, 'http://LOCALHOST'))  # a page served by this server
+            try:
+                WS(port, 'https://example.com')
+                raise SystemExit('foreign origin was accepted')
+            except AssertionError as refused:
+                assert b'403' in refused.args[0]
+            listener = WS(port)
+            clients.append(listener)
+            listener.send('hello listen')
+            pcm = listener.until(lambda op, p: op == 2 and p[0] == 2)
+            assert struct.unpack('<BBHI', pcm[:8]) == (2, 2, 0, 48000) and len(pcm) >= 8 + 4 * 1920 and (len(pcm) - 8) % 4 == 0
+            assert len(set(pcm[8:])) > 4
+            listener.send('hello mute')
             print('WebSocket: SHA1/Base64 handshake, transport 120 BPM, 2064-byte little-endian audio, remote filtering OK')
 
             state = '{"type":"state","preset":"test","blend":2.0}'

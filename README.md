@@ -26,6 +26,7 @@ An audio-reactive VJ playground for REAPER: a lightweight native CLAP effect str
 - **Shape the response:** drums, bass and melody selectors with level meters. This is frequency/transient filtering, not AI instrument separation.
 - **Recall a look:** eight scene slots, beat-linked effects and visual state saved with the REAPER project. Favorites and pad assignments stay in the browser.
 - **Keep audio intact:** stereo float/double passthrough; visualization and networking run outside the audio callback.
+- **Bring your friends in:** scan a QR code in the plugin window to join from a phone, or start a Cloudflare tunnel with one click and share the link as a ready-made picture. Guests can watch, hear the master bus and play along.
 - **Run locally:** plugin-served display and controller over HTTP/WebSocket, with bundled browser libraries and no cloud account.
 
 ## Graffiti tags
@@ -54,7 +55,7 @@ The native plugin is Linux-only and uses an X11/XCB window. On an Omarchy Waylan
 1. Install build dependencies on your Arch/Omarchy system:
 
    ```bash
-   sudo pacman -S --needed base-devel git pkgconf cairo libxcb
+   sudo pacman -S --needed base-devel git pkgconf cairo libxcb qrencode
    ```
 
 2. Install [REAPER for Linux](https://www.reaper.fm/download.php). For ARM64 choose **Linux aarch64**, extract the archive and run its supplied `install-reaper.sh`. The development machine uses native aarch64 REAPER 7.79. No Windows bridge is needed.
@@ -88,7 +89,29 @@ Only the first five image slots are shown at a time; each can select a file from
 
 ### Networking and compatibility
 
-The server binds to **all interfaces on port 8765**, without login or TLS. Use a trusted LAN: connected clients can receive audio, control visuals and read the served web assets, including imported images. Do not forward the port to the internet. If a firewall is active, allow TCP 8765 from your tablet's LAN only.
+The server binds to **all interfaces on port 8765**, without login or TLS. Use a trusted LAN: connected clients can receive audio, control visuals and read the served web assets, including imported images. Do not forward the port to the internet; use the internet link below instead. If a firewall is active, allow TCP 8765 from your tablet's LAN only.
+
+### Phones, QR codes and the internet link
+
+<img src="docs/plugin-window.png" alt="Plugin window with links, two QR codes and the internet link switch" width="640">
+
+The plugin window lists the addresses as links and shows a QR code for the first network address. It opens the start page, which asks whether the device should be the **remote only** or **display + remote** on one page:
+
+| Start page | Display + remote |
+|---|---|
+| <img src="docs/start-choice.png" alt="Start page with the two choices" width="380"> | <img src="docs/start-both.jpg" alt="Display on top, controller below" width="300"> |
+
+**Sound:** the display has a switch in the bottom left corner (on a big screen it appears on touch or pointer movement). Tap it to hear the master bus on that device. The stream is 16-bit stereo, about 1.5 Mbit/s per listener, and plays roughly a quarter of a second late.
+
+**Start internet link** runs a [Cloudflare quick tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do-more-with-tunnels/trycloudflare/) and shows its `https://….trycloudflare.com` address as a link and a second QR code. It needs `cloudflared` (`sudo pacman -S cloudflared`), no account and no open port. The link is off until you start it, gets a new random address every time and stops with the plugin.
+
+<img src="docs/share-qr.png" alt="Share picture with the QR code of the internet link" width="300" align="right">
+
+**Copy QR picture for sharing** puts this picture on the clipboard (via `wl-copy` or `xclip`), ready to paste into a chat. The addresses in these screenshots are examples.
+
+There is still no login: everyone who has the address can watch, listen, control and load the imported images, so share it like a password. The plugin only accepts WebSocket connections from its own pages, so other websites open in your browser cannot listen in.
+
+<br clear="right">
 
 Set environment variables **before starting REAPER**:
 

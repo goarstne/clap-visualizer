@@ -4,7 +4,7 @@ The Linux CLAP effect passes audio through unchanged and serves HTTP and WebSock
 
 ## HTTP
 
-- `GET /`: `index.html` (display); `GET /remote.html`: controller.
+- `GET /`: `index.html` (display); `GET /remote.html`: controller; `GET /start.html`: lets a device choose between the remote and display + remote.
 - Other GET paths serve files from `VSTVIS_WEB_DIR`, or the `clapvisualizer.web/` directory beside the loaded plugin, resolved using `dladdr`.
 - Paths containing `..` or resolving outside the web directory are rejected. Only GET is supported.
 - Supported MIME types include HTML, JavaScript, CSS, JSON, SVG, PNG, JPEG, WebP, ICO and WASM.
@@ -15,10 +15,11 @@ The Linux CLAP effect passes audio through unchanged and serves HTTP and WebSock
 |---|---|
 | Exact `hello display` | Enable binary audio frames for this client |
 | Exact `hello remote` | Disable binary audio frames (also the default) |
+| Exact `hello listen` / `hello mute` | Start / stop the playable audio stream for this client |
 | Starts with `{"type":"state"` | Store as current state (maximum 64 KiB); relay to all other clients |
 | Other text | Relay to all other clients without storing |
 
-After the handshake, a new client receives the stored state first, if present. The CLAP state extension saves and restores the same opaque string in the host project. All clients receive transport messages at approximately 20 Hz:
+A handshake with an `Origin` header is refused with 403 unless the origin's host equals the `Host` header, so only pages served by the plugin can connect from a browser. After the handshake, a new client receives the stored state first, if present. The CLAP state extension saves and restores the same opaque string in the host project. All clients receive transport messages at approximately 20 Hz:
 
 ```json
 {"type":"transport","bpm":120.0,"playing":true,"beat":17.25,"tsNum":4,"tsDen":4,"rms":0.21,"peak":0.63,"sampleRate":48000}
@@ -37,6 +38,16 @@ Display clients also receive binary audio at approximately 60 Hz, little-endian:
 | 8 | f64 | Beat position |
 | 16 | u8[N] | Latest left samples: clipped `128 + sample * 127` |
 | 16 + N | u8[N] | Latest right samples, same encoding |
+
+Listening clients receive the complete signal for playback, about 40 ms per frame. A client more than half a second behind skips frames.
+
+| Offset | Type | Meaning |
+|---|---|---|
+| 0 | u8 | Frame type 2 |
+| 1 | u8 | Channels, always 2 |
+| 2 | u16 | Reserved, 0 |
+| 4 | u32 | Sample rate |
+| 8 | i16[] | Interleaved left/right samples |
 
 Mono input is duplicated. Text messages must be complete, masked, valid UTF-8 WebSocket frames; fragmented and oversized frames are rejected. Ping/Pong and Close are supported.
 

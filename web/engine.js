@@ -120,8 +120,9 @@
         const source = document.createElement('canvas');
         source.className = 'deck-canvas'; source.hidden = true; canvas.parentNode.insertBefore(source, canvas);
         const visualizer = butterchurn.createVisualizer(null, source, {
-          width: Math.max(1, Math.round(root.innerWidth * this.scale)),
-          height: Math.max(1, Math.round(root.innerHeight * this.scale)), pixelRatio: this.ratio
+          // Butterchurn draws into width × height canvas pixels, so the pixel ratio is applied here, not passed on.
+          width: Math.max(1, Math.round(root.innerWidth * this.scale * this.ratio)),
+          height: Math.max(1, Math.round(root.innerHeight * this.scale * this.ratio)), pixelRatio: 1
         });
         return { letter, canvas: source, visualizer, name: '', visibleSince: null, viz: null, type: null };
       });
@@ -161,7 +162,7 @@
       const pixelsH = Math.max(1, Math.round(height * this.ratio));
       for (const deck of this.decks) {
         deck.canvas.width = pixelsW; deck.canvas.height = pixelsH;
-        deck.visualizer.setRendererSize(width, height, { pixelRatio: this.ratio });
+        deck.visualizer.setRendererSize(pixelsW, pixelsH, { pixelRatio: 1 });
         if (deck.viz) deck.viz.resize(pixelsW, pixelsH);
       }
       if (this.fx) this.fx.resize(pixelsW, pixelsH);

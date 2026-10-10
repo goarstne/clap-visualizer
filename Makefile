@@ -13,7 +13,7 @@ all: build/clapvisualizer.clap tools/fakehost tools/guitest
 
 build/clapvisualizer.clap: plugin/clapvisualizer.cpp $(HEADERS)
 	mkdir -p build
-	$(CXX) $(CPPFLAGS) $(shell pkg-config --cflags xcb cairo) $(CXXFLAGS) -fPIC -fvisibility=hidden -shared $< -o $@ $(LDFLAGS) $(LDLIBS) $(shell pkg-config --libs xcb cairo)
+	$(CXX) $(CPPFLAGS) $(shell pkg-config --cflags xcb cairo libqrencode) $(CXXFLAGS) -fPIC -fvisibility=hidden -shared $< -o $@ $(LDFLAGS) $(LDLIBS) $(shell pkg-config --libs xcb cairo libqrencode)
 
 tools/fakehost: tools/fakehost.cpp $(HEADERS)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $< -o $@ $(LDFLAGS) $(LDLIBS)

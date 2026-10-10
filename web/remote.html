@@ -564,7 +564,7 @@ body.canvas-on main { display: none; }
           const [,i,k] = msg.k.split('.'); const layer = state.img[Number(i)];
           if(layer && k in IMG_DEFAULT && k!=='on') { layer[k]=msg.v; renderImgUI(); }
         }
-      } else if(msg.type==='thumb' && msg.preset) {
+      } else if(msg.type==='thumb' && msg.preset && /^data:image\/jpeg;base64,[A-Za-z0-9+\/=]{1,12000}$/.test(msg.data)) {
         try{ localStorage.setItem('vstvis_thumb_'+msg.preset, msg.data); }catch(e){}
         if(state.deckA===msg.preset) updateDeckThumb('A',msg.preset);
         if(state.deckB===msg.preset) updateDeckThumb('B',msg.preset);
