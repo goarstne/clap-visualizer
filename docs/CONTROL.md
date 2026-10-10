@@ -77,9 +77,9 @@ Actions: `swap` crossfades; `load` loads the named deck without changing mix; `s
 {"type":"bands","drums":0.42,"bass":0.61,"melody":0.18,"hats":0.25,"kickHit":1,"hatsHit":0,"bassNote":"C2","leadNote":"A4"}
 ```
 
-Thumbnails: 96×54 JPEG, quality about 0.5, under 6 KiB, once per preset/session after three seconds visible; cached by the remote. Optional pending feedback: about 5 Hz; zero means complete. Bands: about 10 Hz even for disabled sources, 0..1, fast attack and about 0.3 s decay. Feedback includes transient hits (`kickHit`, `hatsHit`) for UI LED flash feedback and detected musical pitches (`bassNote`, `leadNote`).
+Thumbnails: 96×54 JPEG, quality about 0.5, under 6 KiB, once per preset/session after three seconds visible; cached by the remote. Optional pending feedback: about 5 Hz; zero means complete. Bands: about 10 Hz even for disabled sources, 0..1, fast attack and about 0.3 s decay. Feedback includes transient hits (`kickHit`, `hatsHit`: 1 if a hit occurred since the previous message) for UI LED flash feedback and detected musical pitches (`bassNote`, `leadNote`).
 
-Audio bands use frequency/transient filtering: drums = transients below 180 Hz; bass = sustained content below 180 Hz; melody = sustained content between 180 Hz and 5 kHz; hats = high-frequency transients above 2.5 kHz. All enabled bypasses exactly; all disabled is silence. Missing/invalid selection defaults to all. Selection affects both engines and image pulse; sensitivity applies afterward.
+Audio bands use frequency/transient filtering: drums (Kick) = transients below 180 Hz; bass = sustained content below 180 Hz; melody (Lead) = sustained content between 180 Hz and 5 kHz; hats = transients between 180 Hz and 5 kHz plus everything above 5 kHz. A selection without `hats` switches the hats with `drums`, and the drums level then covers both. All enabled bypasses exactly; all disabled is silence. Missing/invalid selection defaults to all. Selection affects both engines and image pulse; sensitivity applies afterward.
 
 ## Page versions
 
@@ -153,7 +153,7 @@ if (tags.render(now, state.tag, pulse, clock)) params.tag = tags.canvas; // 1280
 params.tagBlend = 0; // 1 add, 2 difference, 3 melt
 ```
 
-`ShaderViz.names` contains seven `◆ ` presets: Spectrum, Oscilloscope, Circle, Tunnel, Plasma, Stars, Grid. German names from older projects are mapped on load. A 1024-sample FFT provides a 512×2 texture (log spectrum 30 Hz..16 kHz, waveform) alongside Clubber-style 4D modulation vectors `uKick`, `uBassBand`, `uLead`, `uHats` (`vec4 [energy, envelope, trigger, pitch]`) for musical transient punches (`.z`) and harmonic pitch tracking (`.w`). Camera controls use zoom/rotation/warp/displacement. dt is already speed-scaled.
+`ShaderViz.names` contains seven `◆ ` presets: Spectrum, Oscilloscope, Circle, Tunnel, Plasma, Stars, Grid. German names from older projects are mapped on load. A 1024-sample FFT provides a 512×2 texture (log spectrum 30 Hz..16 kHz, waveform) alongside Clubber-style 4D modulation vectors `uKick`, `uBassBand`, `uLead`, `uHats` (`vec4 [energy, envelope, trigger, pitch]`, each the mean over the FFT bins of 25..150 Hz, 65..390 Hz, 370..1050 Hz and 830 Hz..16 kHz) for musical transient punches (`.z`) and harmonic pitch tracking (`.w`). Camera controls use zoom/rotation/warp/displacement. dt is already speed-scaled.
 
 PostFX params: `mix`, effect/color values, `invert`/`flash`/`black` (0..1), five `layers`, three touch points `{x,y,a}`, `time` seconds. Pipeline: touch distortion → mirror/kaleidoscope → A/B mix → normal images → graffiti tags (`tag`, a canvas with alpha, uploaded each frame while shown) → RGB split → color → trails → top images → touch light → flash → blackout. Defaults reproduce A; srcB may be null.
 

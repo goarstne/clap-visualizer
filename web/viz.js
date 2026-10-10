@@ -36,17 +36,10 @@
     return (m >= 0 && m <= 127) ? NOTE_NAMES[m % 12] + (Math.floor(m / 12) - 1) : '';
   }
 
-  // Clubber-style musical band boundaries (in MIDI note numbers):
-  // kick: Sub-bass & kick drum punch (~25 Hz..~147 Hz)
-  // bass: Basslines & 808 fundamental body (~65 Hz..~392 Hz)
-  // lead: Melody, synth leads, vocals & chords (~370 Hz..~1050 Hz)
-  // hats: Snares, hi-hats, cymbals & high sparkle (~830 Hz..~16000 Hz)
-  const CLUBBER_BANDS = {
-    kick: { min: 20, max: 38 },
-    bass: { min: 36, max: 55 },
-    lead: { min: 54, max: 84 },
-    hats: { min: 80, max: 118 }
-  };
+  // Band edges in Hz. A band is the mean over its FFT bins, so the wide ones do not saturate,
+  // and every band holds at least one bin at any sample rate.
+  const BANDS = { kick: [25, 150], bass: [65, 390], lead: [370, 1050], hats: [830, 16000] };
+  const BAND_GAIN = 2;
   const bandState = {
     kick: { env: 0, trig: 0, last: 0 },
     bass: { env: 0, trig: 0, last: 0 },
@@ -59,7 +52,7 @@
     lead: new Float32Array(4),
     hats: new Float32Array(4)
   };
-  const noteNames = { kick: '', bass: '', lead: '', hats: '' };
+  const noteNames = { bass: '', lead: '' };
   const hits = { kick: false, hats: false };
   const ZERO4 = new Float32Array(4);
 
@@ -97,16 +90,11 @@
       midFast += attack * (midPower - midFast); midSlow += follow * (midPower - midSlow);
       lowGate = (lowFast > Math.max(1e-6, lowSlow * 6) || lowPower > Math.max(1e-6, lowSlow * 30)) ? 1 : lowGate * release;
       midGate = (midFast > Math.max(1e-6, midSlow * 6) || midPower > Math.max(1e-6, midSlow * 30)) ? 1 : midGate * release;
-      const ht = high - top;
-      const d = low * lowGate + top * midGate + ht, b = low * (1 - lowGate), m = top * (1 - midGate);
-      drums += d * d; bass += b * b; melody += m * m; hats += ht * ht;
-      if (!bypass) {
-        if (!hasHats) {
-          selected[i] = 128 + 127 * ((useDrums ? d : 0) + (useBass ? b : 0) + (useMelody ? m : 0));
-        } else {
-          selected[i] = 128 + 127 * ((useDrums ? low * lowGate : 0) + (useBass ? b : 0) + (useMelody ? m : 0) + (useHats ? top * midGate + ht : 0));
-        }
-      }
+      // Low transients are the kick; mid transients and everything above 5 kHz are the hats.
+      // A selection without "hats" switches both with "drums", and its drums level covers both.
+      const kick = low * lowGate, hat = top * midGate + high - top, b = low * (1 - lowGate), m = top * (1 - midGate);
+      drums += hasHats ? kick * kick : (kick + hat) ** 2; bass += b * b; melody += m * m; hats += hat * hat;
+      if (!bypass) selected[i] = 128 + 127 * ((useDrums ? kick : 0) + (useBass ? b : 0) + (useMelody ? m : 0) + (useHats ? hat : 0));
     }
     Object.assign(state, { lowFast, lowSlow, lowGate, midFast, midSlow, midGate });
     const rms = sum => Math.min(1, Math.sqrt(sum / (wave.length || 1)));
@@ -145,34 +133,16 @@
     audio.bass = bass / 128; audio.mid = mid / 230; audio.treb = treb / 154;
     audio.level = (bass + mid + treb) / BINS;
 
-    // Clubber-style 128-note MIDI mapping & musical band feature extraction:
-    const noteEnergy = new Float32Array(128);
-    const invLog2 = 1.4426950408889634; // 1 / Math.log(2)
-    for (let k = 1; k < BINS; k++) {
-      const f = k * perBin;
-      if (f < 20 || f > 16000) continue;
-      const m = 69 + 12 * Math.log(f / 440) * invLog2;
-      const idx = Math.floor(m);
-      if (idx >= 0 && idx < 127) {
-        const frac = m - idx;
-        const mag = Math.hypot(re[k], im[k]) / (N / 4);
-        const pwr = Math.sqrt(mag) * (1 + 2 * k / BINS);
-        noteEnergy[idx] += pwr * (1 - frac);
-        noteEnergy[idx + 1] += pwr * frac;
+    // Clubber-style band vectors: energy, envelope, onset trigger, pitch centre (0..1 on a log axis).
+    for (const key in BANDS) {
+      const [lo, hi] = BANDS[key];
+      const first = Math.max(1, Math.ceil(lo / perBin)), last = Math.max(first, Math.min(BINS - 1, Math.floor(hi / perBin)));
+      let sum = 0, weight = 0;
+      for (let k = first; k <= last; k++) {
+        const val = Math.sqrt(Math.hypot(re[k], im[k]) / (N / 4));
+        sum += val; weight += val * Math.log(k * perBin / lo);
       }
-    }
-
-    for (const key of ['kick', 'bass', 'lead', 'hats']) {
-      const { min, max } = CLUBBER_BANDS[key];
-      let sum = 0, weight = 0, maxVal = 0, maxIdx = min;
-      for (let m = min; m <= max; m++) {
-        const val = noteEnergy[m];
-        sum += val;
-        weight += (m - min) * val;
-        if (val > maxVal) { maxVal = val; maxIdx = m; }
-      }
-      const count = max - min + 1;
-      const energy = Math.min(1, (sum / Math.sqrt(count)) * 1.5);
+      const energy = Math.min(1, sum / (last - first + 1) * BAND_GAIN);
       const st = bandState[key];
       const jump = energy - st.last;
       const isHit = (energy > st.env * 1.25 + 0.04) && (jump > 0.035);
@@ -187,14 +157,12 @@
         st.trig = Math.max(0, st.trig - dt * 12.0);
       }
 
-      const pitch = sum > 1e-4 ? (weight / (sum * (max - min))) : 0.5;
+      const pitch = sum > 1e-4 ? weight / (sum * Math.log(hi / lo)) : 0.5;
       const vec = bandVecs[key];
       vec[0] = energy;
       vec[1] = st.env;
       vec[2] = st.trig;
       vec[3] = Math.max(0, Math.min(1, pitch));
-
-      noteNames[key] = maxVal > 0.06 ? noteName(maxIdx) : '';
     }
 
     function findPeakNote(minHz, maxHz, threshold) {
@@ -216,8 +184,8 @@
       const m = 69 + 12 * Math.log2(Math.max(10, fEst) / 440);
       return noteName(m);
     }
-    if (bandVecs.bass[0] > 0.08) noteNames.bass = findPeakNote(40, 340, 0.08);
-    if (bandVecs.lead[0] > 0.08) noteNames.lead = findPeakNote(340, 2500, 0.08);
+    noteNames.bass = bandVecs.bass[0] > 0.08 ? findPeakNote(40, 340, 0.08) : '';
+    noteNames.lead = bandVecs.lead[0] > 0.08 ? findPeakNote(340, 2500, 0.08) : '';
 
     hits.kick = bandVecs.kick[2] > 0.5;
     hits.hats = bandVecs.hats[2] > 0.5;

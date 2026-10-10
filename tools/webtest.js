@@ -22,9 +22,26 @@ for (const k of ['kick', 'bass', 'lead', 'hats']) {
 }
 const resA4 = viz.analyze(Uint8Array.from({ length: 1024 }, (_, i) => Math.round(128 + 100 * Math.sin(2 * Math.PI * 440 * i / 48000))), 0.016, 48000);
 assert.strictEqual(resA4.notes.lead, 'A4');
-const resHits = viz.analyze(Uint8Array.from({ length: 1024 }, (_, i) => i % 240 === 0 ? 255 : 128), 0.016, 48000);
-assert(resHits.hits && (resHits.hits.kick || resHits.hits.hats));
-assert(resHits.bands.kick[2] > 0.5 || resHits.bands.hats[2] > 0.5);
+// Two seconds at 120 BPM over a noise floor: kicks on the beat, hats in between. Each band fires only
+// for its own instrument, and the wide hats band stays clear of full scale.
+{
+  let seed = 1; const noise = () => ((seed = seed * 1664525 + 1013904223 >>> 0) / 2 ** 32) * 2 - 1;
+  const song = Float32Array.from({ length: 96000 }, (_, i) => {
+    const t = i / 48000, beat = t % 0.5, off = (t + 0.25) % 0.5;
+    return 0.6 * Math.sin(2 * Math.PI * 55 * beat) * Math.exp(-beat * 18) + 0.25 * noise() * Math.exp(-off * 60) + 0.05 * noise();
+  });
+  const onsets = { kick: [], hats: [] }, was = {}; let top = 0;
+  for (let frame = 20; frame < 120; frame++) {
+    const end = frame * 800, res = viz.analyze(Uint8Array.from({ length: 1024 }, (_, i) => Math.round(128 + 127 * song[end - 1024 + i])), 1 / 60, 48000);
+    // The first frames only settle the envelopes after the tones above.
+    for (const key of ['kick', 'hats']) { if (frame > 24 && res.hits[key] && !was[key]) onsets[key].push(Math.round(frame / 15) / 4); was[key] = res.hits[key]; }
+    top = Math.max(top, res.bands.hats[0]);
+  }
+  assert.deepStrictEqual(onsets, { kick: [0.5, 1, 1.5], hats: [0.75, 1.25, 1.75] });
+  assert(top > 0.15 && top < 0.9, `hats energy ${top}`);
+}
+// At 96 kHz the kick band still holds a bin.
+assert(viz.analyze(Uint8Array.from({ length: 1024 }, (_, i) => Math.round(128 + 100 * Math.sin(2 * Math.PI * 90 * i / 96000))), 0.016, 96000).bands.kick[0] > 0.3);
 
 global.window = { location: { search: '' } };
 require(path.join(web, 'engine.js'));
@@ -123,6 +140,16 @@ assert(sent.every(message => message.type === 'bands' && message.bass > 0 && Obj
 const beforeDecay = engine.bands.bass;
 engine.processAudio(524);
 assert(Math.abs(engine.bands.bass - beforeDecay * Math.exp(-1)) < 1e-10);
+// A hit seen between two messages is reported once, with the next one.
+engine.hit = { kick: 1, hats: 0 }; engine.processAudio(700); engine.processAudio(900);
+assert.deepStrictEqual(sent.slice(-2).map(message => [message.kickHit, message.hatsHit]), [[1, 0], [0, 0]]);
+// With a hats switch, each level meter measures what its switch selects.
+{
+  const four = { ...all, hats: true }, hit = viz.splitStems(clicks, four, 48000), old = viz.splitStems(clicks, all, 48000);
+  assert(hit.hats > 5 * hit.drums && Math.abs(old.drums - hit.hats) < 0.05, JSON.stringify([hit.drums, hit.hats, old.drums]));
+  const kickOnly = viz.splitStems(clicks, { ...none, drums: true, hats: false }, 48000).wave;
+  assert(kickOnly.every(value => Math.abs(value - 128) < 127 * 0.2));
+}
 
 for (const routine of ['zoom', 'spin', 'flash', 'unknown']) {
   const test = Object.create(Engine.prototype);

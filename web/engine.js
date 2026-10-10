@@ -106,7 +106,7 @@
       this.touch = [0, 1, 2].map(() => ({ x: 0, y: 0, on: false, a: 0 }));
       // Graffiti tags are mixed in by PostFX, so they need its canvas.
       this.tags = this.fx && root.VJTags ? root.VJTags.create() : null;
-      this.spectrum = null; this.bands = { drums: 0, bass: 0, melody: 0 };
+      this.spectrum = null; this.bands = { drums: 0, bass: 0, melody: 0 }; this.hit = { kick: 0, hats: 0 };
       this.stemState = [{}, {}];
       this.lastBands = -Infinity; this.audioFrameAt = performance.now();
       this.flashes = []; this.flashAt = this.kickAt = -Infinity; this.strobeStep = null;
@@ -505,10 +505,8 @@
       if (now - this.lastBands >= 100) {
         const spec = this.spectrum;
         const msg = { type: 'bands', ...this.bands };
-        if (spec && spec.hits) {
-          msg.kickHit = spec.hits.kick ? 1 : 0;
-          msg.hatsHit = spec.hits.hats ? 1 : 0;
-        }
+        // Hits last a few frames only, so they are kept until the next message.
+        if (this.hit) { msg.kickHit = this.hit.kick; msg.hatsHit = this.hit.hats; this.hit.kick = this.hit.hats = 0; }
         if (spec && spec.notes) {
           msg.bassNote = spec.notes.bass || '';
           msg.leadNote = spec.notes.lead || '';
@@ -547,7 +545,11 @@
         if (step !== this.strobeStep) { this.flash(now); this.strobeStep = step; }
       }
       const options = { audioLevels: this.processAudio(now), elapsedTime: Math.max(0.000001, dt * (this.held.freeze ? 0 : this.frameFX.speed)) };
-      if (root.ShaderViz) this.spectrum = root.ShaderViz.analyze(this.levels.timeByteArray, dt, this.transport.sampleRate);
+      if (root.ShaderViz) {
+        this.spectrum = root.ShaderViz.analyze(this.levels.timeByteArray, dt, this.transport.sampleRate);
+        if (this.spectrum.hits.kick) this.hit.kick = 1;
+        if (this.spectrum.hits.hats) this.hit.hats = 1;
+      }
       const draw = deck => {
         if (!deck.type) { deck.visualizer.render(options); return deck.canvas; }
         deck.viz.render(deck.type, this.spectrum, this.frameFX, options.elapsedTime, this.state.stems);
