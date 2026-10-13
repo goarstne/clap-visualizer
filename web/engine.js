@@ -9,7 +9,7 @@
     bass: [0, 3, 1], mid: [0, 3, 1], treb: [0, 3, 1]
   };
   const periods = { '1/2': 0.5, '1': 1, '2': 2, '4': 4, '8': 8 };
-  const moments = ['flash', 'black', 'invert', 'freeze', 'kick', 'mirror', 'kaleido', 'strobe',
+  const moments = ['glitch', 'stutter', 'tunnel', 'edges', 'pixel', 'vortex', 'thermal', 'shock', 'flash', 'black', 'invert', 'freeze', 'kick', 'mirror', 'kaleido', 'strobe',
     'zoom', 'spin', 'rgb', 'trails', 'hue', 'mono', 'shake', 'turbo'];
   const imgRanges = {
     x: [-1.5, 1.5, 0], y: [-1.5, 1.5, 0], s: [0.05, 4, 0.6], r: [-31.4, 31.4, 0],
@@ -496,6 +496,7 @@
       if (held.mono) fx.sat = 0;
       if (held.shake) { fx.dx = Math.random() * 2 - 1; fx.dy = Math.random() * 2 - 1; }
       if (held.turbo) fx.speed = 3;
+      if (held.glitch) fx.rgb = Math.max(fx.rgb, 0.5);
     }
 
     // Smoothed image layers for this frame, in the units PostFX expects.
@@ -619,11 +620,21 @@
       const tagCanvas = this.tags && this.tags.render(now, this.state.tag, pulse, clock) ? this.tags.canvas : null;
       const tagBlend = this.state.tag.melt ? 3 : this.state.tag.diff ? 2 : this.state.tag.add ? 1 : 0;
       this.camera(now);
+      // Stutter shows the last frame again and lets a new one through on every sixteenth.
+      const sixteenth = Math.floor(clock * 4), hold = !!this.held.stutter && sixteenth === this.stutterStep;
+      this.stutterStep = this.held.stutter ? sixteenth : null;
       if (this.fx) {
         this.fx.render(sourceA, sourceB, {
           ...this.frameFX, mix: this.mix, tag: tagCanvas, tagBlend, layers: this.layers(dt, now), touch: this.touch, time: now / 1000 % 3600, kaleido: this.held.kaleido ? 6 : Math.round(this.frameFX.kaleido),
           mirror: this.held.mirror ? 3 : Math.round(this.frameFX.mirror),
           invert: this.held.invert ? 1 : 0, black: this.held.black ? 1 : 0,
+          // The tear pattern changes on every half beat.
+          glitch: this.held.glitch ? 1 + (Math.floor(clock * 2) % 64 + 64) % 64 : 0,
+          edges: this.held.edges ? 1 : 0, tunnel: this.held.tunnel ? 1 : 0, hold: hold ? 1 : 0,
+          // Coarse blocks on the beat that get finer until the next one; a twist that breathes;
+          // one ring per beat running from the centre to the edge.
+          pixel: this.held.pixel ? 12 + 44 * (1 - pulse) : 0, vortex: this.held.vortex ? 2.6 + 1.6 * Math.sin(now / 650) : 0,
+          shock: this.held.shock ? Math.max(0.001, (clock % 1 + 1) % 1) : 0, thermal: this.held.thermal ? 1 : 0,
           flash: Math.max(0, 1 - (now - this.flashAt) / 150)
         });
       }

@@ -7,6 +7,12 @@
  * shift, colour (hue/sat/bright/contrast/invert), trails (feedback), flash and
  * blackout. Trails uses two ping-pong framebuffers and a blit pass; with
  * trails = 0 no framebuffer is used and rendering goes straight to the canvas.
+ * The same framebuffers carry params.tunnel (the last frame shrinks into the
+ * new one) and params.hold (the last frame is shown again, for stutter).
+ * params.glitch (a seed, 0 = off) tears the picture into shifted rows and
+ * blocks; params.edges leaves only glowing outlines. params.pixel is the
+ * number of mosaic rows, params.vortex the twist in radians, params.shock the
+ * phase (0..1) of a ring running outwards, params.thermal a heat palette.
  *
  * Up to five image layers (setImage + params.layers) are composited either
  * inside the chain (they get mirrored, shifted and coloured with the visuals)
@@ -75,11 +81,20 @@
     'uniform sampler2D uTag;\n' +
     'uniform float uTagOn;\n' +
     'uniform sampler2D uDepth;\n' +
+    'uniform float uGlitch;\n' +
+    'uniform float uEdges;\n' +
+    'uniform float uTunnel;\n' +
+    'uniform float uHold;\n' +
+    'uniform float uPixel;\n' +
+    'uniform float uVortex;\n' +
+    'uniform float uShock;\n' +
+    'uniform float uThermal;\n' +
     'in vec2 vUv;\n' +
     'out vec4 outColor;\n' +
     'const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);\n' +
     'const float PI = 3.14159265;\n' +
     'const float TAU = 6.2831853;\n' +
+    'float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }\n' +
     'vec3 hueRotate(vec3 c, float deg) {\n' +
     '  float a = radians(deg);\n' +
     '  float cs = cos(a);\n' +
@@ -159,7 +174,37 @@
     '  return c;\n' +
     '}\n' +
     'void main() {\n' +
+    '  vec2 back = vec2(vUv.x, 1.0 - vUv.y);\n' +
+    '  if (uHold > 0.0) {\n' +
+    '    outColor = vec4(mix(mix(texture(uPrev, back).rgb, vec3(1.0), uFlash), vec3(0.0), uBlack), 1.0);\n' +
+    '    return;\n' +
+    '  }\n' +
     '  vec2 tc = coord(vUv);\n' +
+    '  float ring = 0.0;\n' +
+    '  if (uVortex != 0.0 || uShock > 0.0) {\n' +
+    '    vec2 p = (tc - 0.5) * vec2(uAspect, 1.0);\n' +
+    '    float r = length(p);\n' +
+    '    if (uVortex != 0.0) {\n' +
+    '      float a = uVortex * exp(-r * 2.2);\n' +
+    '      p = vec2(p.x * cos(a) - p.y * sin(a), p.x * sin(a) + p.y * cos(a));\n' +
+    '    }\n' +
+    '    if (uShock > 0.0) {\n' +
+    '      float w = r - uShock * 1.1;\n' +
+    '      ring = exp(-w * w * 260.0) * (1.0 - uShock);\n' +
+    '      p += p / max(r, 0.0001) * sin(w * 46.0) * 0.07 * ring;\n' +
+    '    }\n' +
+    '    tc = p / vec2(uAspect, 1.0) + 0.5;\n' +
+    '  }\n' +
+    '  if (uGlitch > 0.0) {\n' +
+    '    float row = floor(vUv.y * 26.0);\n' +
+    '    if (hash(vec2(row, uGlitch)) > 0.5) tc.x += (hash(vec2(row + 7.0, uGlitch)) - 0.5) * 0.4;\n' +
+    '    vec2 block = floor(vUv * vec2(12.0, 7.0));\n' +
+    '    if (hash(block + uGlitch) > 0.88) tc = fract(tc + vec2(hash(block.yx + uGlitch), hash(block - uGlitch)) * 0.5);\n' +
+    '  }\n' +
+    '  if (uPixel > 0.0) {\n' +
+    '    vec2 cells = vec2(floor(uPixel * uAspect + 0.5), uPixel);\n' +
+    '    tc = (floor(tc * cells) + 0.5) / cells;\n' +
+    '  }\n' +
     '  vec3 c;\n' +
     '  if (uRgb <= 0.0) {\n' +
     '    c = sampleAB(tc);\n' +
@@ -170,13 +215,31 @@
     '    c.g = sampleAB(tc).g;\n' +
     '    c.b = sampleAB(tc - d * off).b;\n' +
     '  }\n' +
+    '  if (uEdges > 0.0) {\n' +
+    '    vec2 e = vec2(0.0025 / uAspect, 0.0025);\n' +
+    '    float gx = dot(sampleAB(tc + vec2(e.x, 0.0)) - sampleAB(tc - vec2(e.x, 0.0)), LUMA);\n' +
+    '    float gy = dot(sampleAB(tc + vec2(0.0, e.y)) - sampleAB(tc - vec2(0.0, e.y)), LUMA);\n' +
+    '    c = (c + 0.1) / max(max(c.r, max(c.g, c.b)) + 0.1, 0.25) * smoothstep(0.04, 0.3, length(vec2(gx, gy))) * 1.4;\n' +
+    '  }\n' +
+    '  c += vec3(0.9, 0.95, 1.0) * ring * 0.6;\n' +
+    '  if (uThermal > 0.0) {\n' +
+    '    float h = clamp(dot(c, LUMA) * 1.25, 0.0, 1.0);\n' +
+    '    c = mix(vec3(0.0, 0.0, 0.12), vec3(0.1, 0.0, 0.75), smoothstep(0.0, 0.2, h));\n' +
+    '    c = mix(c, vec3(0.85, 0.0, 0.65), smoothstep(0.2, 0.42, h));\n' +
+    '    c = mix(c, vec3(1.0, 0.25, 0.0), smoothstep(0.42, 0.62, h));\n' +
+    '    c = mix(c, vec3(1.0, 0.9, 0.1), smoothstep(0.62, 0.82, h));\n' +
+    '    c = mix(c, vec3(1.0), smoothstep(0.82, 1.0, h));\n' +
+    '  }\n' +
     '  c = hueRotate(c, uHue);\n' +
     '  float l = dot(c, LUMA);\n' +
     '  c = mix(vec3(l), c, uSat);\n' +
     '  c *= uBright;\n' +
     '  c = (c - vec3(0.5)) * uContrast + vec3(0.5);\n' +
     '  c = mix(c, vec3(1.0) - c, uInvert);\n' +
-    '  if (uTrails > 0.0) c = mix(c, texture(uPrev, vec2(vUv.x, 1.0 - vUv.y)).rgb, uTrails);\n' +
+    '  if (uTunnel > 0.0) {\n' +
+    '    vec2 p = (back - 0.5) * 1.07 + 0.5;\n' + // sampled further out, so the old frame shrinks
+    '    if (p.x > 0.0 && p.x < 1.0 && p.y > 0.0 && p.y < 1.0) c = mix(c, texture(uPrev, p).rgb, 0.82);\n' +
+    '  } else if (uTrails > 0.0) c = mix(c, texture(uPrev, back).rgb, uTrails);\n' +
     '  c = layers(c, vUv, 1.0);\n' +
     '  for (int i = 0; i < 3; i++) {\n' +
     '    vec3 t = uTouch[i];\n' +
@@ -207,7 +270,8 @@
 
   var UNIFORMS = ['uSrcA', 'uSrcB', 'uPrev', 'uMix', 'uHue', 'uSat', 'uBright',
     'uContrast', 'uInvert', 'uKaleido', 'uMirror', 'uTrails', 'uRgb', 'uFlash',
-    'uBlack', 'uAspect', 'uTime', 'uLayA', 'uLayB', 'uLayC', 'uTouch', 'uTagOn'];
+    'uBlack', 'uAspect', 'uTime', 'uLayA', 'uLayB', 'uLayC', 'uTouch', 'uTagOn',
+    'uGlitch', 'uEdges', 'uTunnel', 'uHold', 'uPixel', 'uVortex', 'uShock', 'uThermal'];
 
   var LAYERS = 5, TOUCHES = 3, IMAGE_UNIT = 3, TAG_UNIT = IMAGE_UNIT + LAYERS, DEPTH_UNIT = TAG_UNIT + 1;
 
@@ -460,6 +524,7 @@
     var rgb = clamp01(val(p, 'rgb', 0));
     var flash = clamp01(val(p, 'flash', 0));
     var black = clamp01(val(p, 'black', 0));
+    var tunnel = val(p, 'tunnel', 0) > 0, hold = val(p, 'hold', 0) > 0;
 
     var w = this.width, h = this.height;
     if (w <= 0 || h <= 0) return;
@@ -491,6 +556,13 @@
     gl.uniform1f(u.uBlack, black);
     gl.uniform1f(u.uAspect, w / h);
     gl.uniform1f(u.uTime, val(p, 'time', 0));
+    gl.uniform1f(u.uGlitch, Math.max(0, val(p, 'glitch', 0)));
+    gl.uniform1f(u.uEdges, val(p, 'edges', 0) > 0 ? 1 : 0);
+    gl.uniform1f(u.uTunnel, tunnel ? 1 : 0);
+    gl.uniform1f(u.uPixel, clamp(val(p, 'pixel', 0), 0, 400));
+    gl.uniform1f(u.uVortex, clamp(val(p, 'vortex', 0), -12, 12));
+    gl.uniform1f(u.uShock, clamp01(val(p, 'shock', 0)));
+    gl.uniform1f(u.uThermal, val(p, 'thermal', 0) > 0 ? 1 : 0);
     gl.uniform1f(u.uTagOn, p.tag ? 1 + clamp(Math.round(val(p, 'tagBlend', 0)), 0, 3) : 0);
     if (p.tag) {
       // The tag canvas animates, so it is uploaded every frame it is shown.
@@ -522,7 +594,9 @@
     gl.uniform4fv(u.uLayC, this.layC);
     gl.uniform3fv(u.uTouch, this.touch);
 
-    if (trails > 0) {
+    // A held frame needs a last frame: without framebuffers this one is drawn normally.
+    gl.uniform1f(u.uHold, hold && this.fb[0] && this.fbSize[0] === w && this.fbSize[1] === h ? 1 : 0);
+    if (trails > 0 || tunnel || hold) {
       if (!this.fb[0] || this.fbSize[0] !== w || this.fbSize[1] !== h) {
         this.allocFb(w, h);
       }

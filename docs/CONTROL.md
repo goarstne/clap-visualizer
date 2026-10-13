@@ -56,6 +56,14 @@ Momentary keys use 1 on press, 0 on release:
 | `m.rgb`, `m.trails` | RGB split 1, trails 0.9 |
 | `m.hue`, `m.mono` | Hue cycle once per second, saturation zero |
 | `m.shake`, `m.turbo` | Random displacement each frame, time scale 3 |
+| `m.glitch` | Rows and blocks of the picture jump sideways, RGB split at least 0.5; new pattern every half beat |
+| `m.stutter` | The last frame is repeated, a new one passes on every sixteenth |
+| `m.tunnel` | Each frame is mixed with the shrunken last frame (uses the trails buffers) |
+| `m.edges` | Only outlines remain, in the local colour on black |
+| `m.pixel` | Mosaic: 12 rows of blocks on the beat, getting finer (up to 56) until the next one |
+| `m.vortex` | Twist around the centre, 1 to 4.2 radians, breathing |
+| `m.thermal` | Brightness mapped to a heat palette |
+| `m.shock` | One ring per beat runs from the centre outwards and bends the picture |
 
 Displays clear momentary states on disconnect. The remote releases on pointer cancellation, blur and visibility changes.
 
