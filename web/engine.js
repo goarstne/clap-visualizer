@@ -13,11 +13,11 @@
     'zoom', 'spin', 'rgb', 'trails', 'hue', 'mono', 'shake', 'turbo'];
   const imgRanges = {
     x: [-1.5, 1.5, 0], y: [-1.5, 1.5, 0], s: [0.05, 4, 0.6], r: [-31.4, 31.4, 0],
-    o: [0, 1, 1], pulse: [0, 1, 0], spin: [-2, 2, 0], tile: [1, 6, 1], hue: [0, 360, 0], wob: [0, 1, 0]
+    o: [0, 1, 1], pulse: [0, 1, 0], spin: [-2, 2, 0], tile: [1, 6, 1], hue: [0, 360, 0], wob: [0, 1, 0], depth: [0, 1, 0]
   };
   const tagModes = ['pulse', 'drip', 'neon', 'glitch', 'rainbow', 'zoom', 'spin', 'drift', 'wave', 'trail', 'add', 'diff', 'melt'];
   const imgDefault = () => ({
-    src: '', on: false, x: 0, y: 0, s: 0.6, r: 0, o: 1, m: 0, pulse: 0, spin: 0, top: false, tile: 1, hue: 0, wob: 0
+    src: '', on: false, x: 0, y: 0, s: 0.6, r: 0, o: 1, m: 0, pulse: 0, spin: 0, top: false, tile: 1, hue: 0, wob: 0, depth: 0
   });
   const object = value => value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   const CAM = '@cam';
@@ -113,6 +113,8 @@
       this.camRemote = this.camLocal = null; this.camAsked = -Infinity; this.camTried = 0;
       this.cam = root.VJCam && root.VJCam.supported
         ? root.VJCam.receiver(message => this.socket.send(message), stream => { this.camRemote = stream; this.camSource(); }) : null;
+      // Depth map of the camera picture for the layers' depth cut (depth.js).
+      this.depth = root.VJDepth ? root.VJDepth.create((map, size) => { if (this.fx) this.fx.setDepth(map, size); }) : null;
       // Graffiti tags are mixed in by PostFX, so they need its canvas.
       this.tags = this.fx && root.VJTags ? root.VJTags.create() : null;
       this.spectrum = null; this.bands = { drums: 0, bass: 0, melody: 0 }; this.hit = { kick: 0, hats: 0 };
@@ -269,7 +271,10 @@
           navigator.mediaDevices.getUserMedia({ video: true }).then(stream => { this.camLocal = stream; this.camSource(); }).catch(() => {});
         }
       }
-      if (live) this.images.forEach((src, i) => { if (src === CAM) this.fx.setImage(i, video); });
+      if (!live) return;
+      this.images.forEach((src, i) => { if (src === CAM) this.fx.setImage(i, video); });
+      // The depth model only runs while a camera slot uses it.
+      if (this.depth && this.state.img.some(layer => layer.src === CAM && layer.depth > 0)) this.depth.feed(video);
     }
 
     sendState() { this.socket.send({ type: 'state', ...this.state }); }
@@ -515,7 +520,8 @@
         now.angle = layer.spin ? now.angle + layer.spin * dt * Math.PI : now.angle % (2 * Math.PI) * (1 - amount);
         return {
           x: now.x, y: now.y, s: now.s * (1 + layer.pulse * bass) * scale, r: now.r + now.angle + rotation,
-          o: now.o * now.gain * opacity, m: layer.m, top: layer.top, tile: layer.tile, hue: now.hue, wob: now.wob
+          o: now.o * now.gain * opacity, m: layer.m, top: layer.top, tile: layer.tile, hue: now.hue, wob: now.wob,
+          depth: layer.src === CAM ? layer.depth : 0
         };
       });
     }

@@ -6,6 +6,7 @@ node_modules/
 tools/fakehost
 tools/guitest
 web/pictures/
+web/vendor/depth/
 
 # Personal image folders and generated recordings
 /Pictues/

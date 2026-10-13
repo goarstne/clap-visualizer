@@ -515,7 +515,9 @@ struct Plugin {
             if (c.file>=0) close(c.file);
             c.file=-1; response(c,"404 Not Found","not found"); return;
         }
-        queue(c,std::string("HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: ")+mime(full)+"\r\nContent-Length: "+std::to_string(st.st_size)+"\r\n\r\n");
+        queue(c,std::string("HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: ")+mime(full)+"\r\nContent-Length: "+std::to_string(st.st_size)
+            // Cross-origin isolation: the depth model (web/depth.js) needs threads, threads need SharedArrayBuffer.
+            +"\r\nCross-Origin-Opener-Policy: same-origin\r\nCross-Origin-Embedder-Policy: require-corp\r\n\r\n");
         c.closing=true;
     }
     void websocket(Client &c, std::vector<Client> &clients, uint64_t &seenVersion) {

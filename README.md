@@ -94,6 +94,7 @@ Select an image slot on the controller and tap **📷 Cam**: the slot now shows 
 
 - **Phones and tablets need the internet link.** Browsers only hand out the camera on `https`, so open the controller through the `https://….trycloudflare.com` address (see below), not through `http://YOUR-COMPUTER-IP:8765`. The video itself still travels directly between the devices over WebRTC; expect a delay of a fraction of a second.
 - **A webcam on the display computer** is used when a slot is set to the camera and no phone is sending. The browser asks for permission once on `http://localhost:8765`.
+- **Cam depth cut** keeps what is close to the camera and makes the background transparent, so the visuals run behind you. Raise the fader until only the foreground is left. The display computer estimates the depth of the camera picture with [Depth Anything V2 Small](https://github.com/DepthAnything/Depth-Anything-V2) on its CPU, a few times per second, and only while the fader is up. Run `make depth` once before `make install`: it downloads the model and onnxruntime-web (41 MB) into `web/vendor/depth/`. Without them the fader does nothing.
 - Guests outside your network connect through a public STUN server (`stun.l.google.com`); some mobile networks block that and show no picture.
 
 ### Networking and compatibility
@@ -145,7 +146,7 @@ make test
 VSTVIS_WEB_DIR="$PWD/web" tools/fakehost 0 build/clapvisualizer.clap
 ```
 
-`make test` covers native audio passthrough, state persistence, HTTP path handling, WebSocket framing and relay, browser-side analysis/state logic, and the clickable native window. [`tools/touchtest.js`](tools/touchtest.js) additionally exercises touch controls in landscape and portrait Chromium emulation, and [`tools/camtest.js`](tools/camtest.js) sends Chromium's fake camera from a remote to three displays; both need a local Playwright installation. Real iPad Safari and other host/OS combinations are not certified by those tests.
+`make test` covers native audio passthrough, state persistence, HTTP path handling, WebSocket framing and relay, browser-side analysis/state logic, and the clickable native window. [`tools/touchtest.js`](tools/touchtest.js) additionally exercises touch controls in landscape and portrait Chromium emulation, and [`tools/camtest.js`](tools/camtest.js) sends Chromium's fake camera from a remote to three displays; both need a local Playwright installation. Real iPad Safari and other host/OS combinations are not certified by those tests. [`tools/depthtest.js`](tools/depthtest.js) checks the depth cut of the camera layer the same way.
 
 The [demos](https://github.com/goarstne/clap-visualizer/releases/tag/v1.1.0) use the real plugin in the test host, an original synthesized track, touch automation and public-domain images. They demonstrate the browser workflow rather than a screen recording of REAPER. See [demo recording instructions](docs/DEMO.md).
 

@@ -70,10 +70,11 @@
     'uniform sampler2D uImg4;\n' +
     'uniform vec4 uLayA[5];\n' +  // centre x, centre y (uv), width, height (screen heights)
     'uniform vec4 uLayB[5];\n' +  // rotation, opacity, blend mode, 1 = on top of the chain
-    'uniform vec4 uLayC[5];\n' +  // tiles, hue shift (degrees), wobble
+    'uniform vec4 uLayC[5];\n' +  // tiles, hue shift (degrees), wobble, depth cut
     'uniform vec3 uTouch[3];\n' + // x, y (uv), strength
     'uniform sampler2D uTag;\n' +
     'uniform float uTagOn;\n' +
+    'uniform sampler2D uDepth;\n' +
     'in vec2 vUv;\n' +
     'out vec4 outColor;\n' +
     'const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);\n' +
@@ -97,6 +98,7 @@
     '  if (e.x > 1.5 || e.z > 0.0) q = fract(q * e.x);\n' +
     '  vec3 t = texture(img, q).rgb;\n' +
     '  if (e.y > 0.5) t = hueRotate(t, e.y);\n' +
+    '  if (e.w > 0.0) b.y *= smoothstep(e.w - 0.12, e.w + 0.12, texture(uDepth, q).r);\n' + // near stays, far goes
     '  if (b.z < 0.5) return mix(c, t, b.y);\n' +                             // normal
     '  if (b.z < 1.5) return c + t * b.y;\n' +                                // add
     '  if (b.z < 2.5) return mix(c, vec3(1.0) - (vec3(1.0) - c) * (vec3(1.0) - t), b.y);\n' + // screen
@@ -207,7 +209,7 @@
     'uContrast', 'uInvert', 'uKaleido', 'uMirror', 'uTrails', 'uRgb', 'uFlash',
     'uBlack', 'uAspect', 'uTime', 'uLayA', 'uLayB', 'uLayC', 'uTouch', 'uTagOn'];
 
-  var LAYERS = 5, TOUCHES = 3, IMAGE_UNIT = 3, TAG_UNIT = IMAGE_UNIT + LAYERS;
+  var LAYERS = 5, TOUCHES = 3, IMAGE_UNIT = 3, TAG_UNIT = IMAGE_UNIT + LAYERS, DEPTH_UNIT = TAG_UNIT + 1;
 
   function clamp01(x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
   function clamp(x, lo, hi) { return x < lo ? lo : (x > hi ? hi : x); }
@@ -356,6 +358,10 @@
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
       new Uint8Array([0, 0, 0, 0]));
     gl.uniform1i(gl.getUniformLocation(this.program, 'uTag'), TAG_UNIT);
+    // Until the first depth map arrives everything counts as near.
+    this.depthTex = makeTexture(gl);
+    this.setDepth(new Uint8Array([255]), 1);
+    gl.uniform1i(gl.getUniformLocation(this.program, 'uDepth'), DEPTH_UNIT);
     gl.activeTexture(gl.TEXTURE0);
 
     gl.useProgram(this.blitProgram);
@@ -386,6 +392,17 @@
     gl.activeTexture(gl.TEXTURE0 + IMAGE_UNIT + index);
     gl.bindTexture(gl.TEXTURE_2D, this.imgTex[index]);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, source);
+    gl.activeTexture(gl.TEXTURE0);
+  };
+
+  // Depth map of the camera picture (depth.js): size*size bytes, row 0 at the top, 255 = nearest.
+  PostFX.prototype.setDepth = function (data, size) {
+    if (this.destroyed || this.lost) return;
+    var gl = this.gl;
+    gl.activeTexture(gl.TEXTURE0 + DEPTH_UNIT);
+    gl.bindTexture(gl.TEXTURE_2D, this.depthTex);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, size, size, 0, gl.RED, gl.UNSIGNED_BYTE, data);
     gl.activeTexture(gl.TEXTURE0);
   };
 
@@ -494,7 +511,7 @@
       this.layB.set([shown ? l.r : 0, shown ? clamp01(l.o) : 0, shown ? l.m : 0,
         shown && l.top ? 1 : 0], i * 4);
       this.layC.set([shown ? Math.max(1, Math.round(l.tile || 1)) : 1, shown ? l.hue || 0 : 0,
-        shown ? l.wob || 0 : 0, 0], i * 4);
+        shown ? l.wob || 0 : 0, shown ? l.depth || 0 : 0], i * 4);
     }
     for (var j = 0; j < TOUCHES; j++) {
       var t = touch[j];
@@ -555,6 +572,7 @@
       if (this.srcATex) gl.deleteTexture(this.srcATex);
       if (this.srcBTex) gl.deleteTexture(this.srcBTex);
       if (this.dummyTex) gl.deleteTexture(this.dummyTex);
+      if (this.depthTex) gl.deleteTexture(this.depthTex);
       for (var i = 0; i < this.imgTex.length; i++) gl.deleteTexture(this.imgTex[i]);
       if (this.vao) gl.deleteVertexArray(this.vao);
       if (this.program) gl.deleteProgram(this.program);

@@ -48,7 +48,7 @@ require(path.join(web, 'engine.js'));
 const { normalize, Engine } = global.window.VJEngine;
 const state = normalize({ v: 2, pool: 'nope', favs: ['a', 3], img: [{ on: 1, s: 99, x: 'left', m: 9, src: 5 }, null] }, {}, ['a', 'b']);
 assert.strictEqual(state.img.length, 5);
-assert.deepStrictEqual(state.img[0], { src: '', on: true, x: 0, y: 0, s: 4, r: 0, o: 1, m: 0, pulse: 0, spin: 0, top: false, tile: 1, hue: 0, wob: 0 });
+assert.deepStrictEqual(state.img[0], { src: '', on: true, x: 0, y: 0, s: 4, r: 0, o: 1, m: 0, pulse: 0, spin: 0, top: false, tile: 1, hue: 0, wob: 0, depth: 0 });
 assert(state.pool === 'all' && state.favs.length === 1 && state.deckA === 'a' && state.scenes.length === 8);
 // A later partial state keeps what was set before.
 assert.strictEqual(normalize({ v: 2, img: [{ r: 1 }] }, state, ['a', 'b']).img[0].s, 4);

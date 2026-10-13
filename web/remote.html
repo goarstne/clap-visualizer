@@ -466,7 +466,7 @@ body.canvas-on main { display: none; }
     { key: 'treb', label: 'Highs', min: 0, max: 3, def: 1, step: 0.05 }
   ];
 
-  const IMG_DEFAULT = { src:'', on:false, x:0, y:0, s:0.6, r:0, o:1, m:0, pulse:0, spin:0, top:false, tile:1, hue:0, wob:0 };
+  const IMG_DEFAULT = { src:'', on:false, x:0, y:0, s:0.6, r:0, o:1, m:0, pulse:0, spin:0, top:false, tile:1, hue:0, wob:0, depth:0 };
   const IMG_MODES = ['Normal','Add','Screen','Mult.','Diff.','Luma'];
   const IMG_DEFS = [
     { key:'o', label:'Opacity', min:0, max:1, def:1, step:0.01 },
@@ -476,7 +476,8 @@ body.canvas-on main { display: none; }
     { key:'spin', label:'Spin', min:-2, max:2, def:0, step:0.05 },
     { key:'tile', label:'Tiles', min:1, max:6, def:1, step:1 },
     { key:'hue', label:'Hue', min:0, max:360, def:0, step:1 },
-    { key:'wob', label:'Wobble', min:0, max:1, def:0, step:0.01 }
+    { key:'wob', label:'Wobble', min:0, max:1, def:0, step:0.01 },
+    { key:'depth', label:'Cam depth cut', min:0, max:1, def:0, step:0.01 }
   ];
   const IMG_PADS = [['r','s'], ['hue','wob']];
   const STAGE_ASPECT = 16/9;

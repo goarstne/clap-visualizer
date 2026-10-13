@@ -143,6 +143,7 @@ A remote announces its camera with `on` (false when it stops; displays then drop
 | `m` | 0..5 | 0 | Normal, Add, Screen, Multiply, Difference, Luma key |
 | `pulse`, `spin` | 0..1, -2..2 | 0, 0 | Bass scale, rotation (1 = half turn/second) |
 | `tile`, `hue`, `wob` | 1..6, 0..360, 0..1 | 1, 0, 0 | n×n tiles, hue, distortion |
+| `depth` | 0..1 | 0 | Camera slots only: depth cut, far parts turn transparent (0 = off) |
 | `top` | Boolean | false | Render above effects |
 
 Landscape has four independently scrolling columns: decks/browser; performance/shots; image stage; scenes/effects. Portrait uses two columns and page scrolling. Four effect XY pads store assignments/spring mode in `vstvis_pads`; two image pads affect the selected image. Stage assumes 16:9; other ratios match relative positions, not exact pixels.
@@ -157,6 +158,7 @@ viz.canvas; viz.destroy();
 const fx = PostFX.create(canvas); // null without WebGL2
 fx.resize(width, height); fx.render(srcA, srcB, params);
 fx.setImage(i, image); // null clears layer
+fx.setDepth(map, size); // camera depth map from depth.js: size×size bytes, 255 = nearest
 fx.destroy();
 const tags = VJTags.create();
 tags.add(strokes, now); tags.trigger('burst', now);
