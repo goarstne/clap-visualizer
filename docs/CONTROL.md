@@ -121,7 +121,18 @@ Movement runs on host beats while the transport plays and at 120 BPM otherwise.
 
 ## Images, layout and rendering
 
-`make pictures` copies JPG/JPEG/PNG/WebP from `PICTURES` (default `Pictues/`) and generates sorted `index.json`. Layer i uses `src`, or the i-th filename if empty.
+`make pictures` copies JPG/JPEG/PNG/WebP from `PICTURES` (default `Pictues/`) and generates sorted `index.json`. Layer i uses `src`, or the i-th filename if empty. The `src` `@cam` shows the live camera instead of a file: the stream of a remote that sends its camera, otherwise a webcam on the display's computer.
+
+The camera is negotiated with `cam` messages (WebRTC, see [`web/cam.js`](../web/cam.js)); the video does not pass through the plugin:
+
+```json
+{"type":"cam","on":true}
+{"type":"cam","want":"<display id>","aspect":1.78}
+{"type":"cam","to":"<display id>","sdp":{"type":"offer","sdp":"..."}}
+{"type":"cam","from":"<display id>","sdp":{"type":"answer","sdp":"..."}}
+```
+
+A remote announces its camera with `on` (false when it stops; displays then drop the stream). A display with a camera slot and no stream sends `want` every 3 s; the camera answers each display with an offer and gets one answer back. ICE candidates travel inside the descriptions. `aspect` (width / height of the running picture) lets remotes draw the camera box in the right shape.
 
 | Image field | Range | Default | Meaning |
 |---|---|---|---|

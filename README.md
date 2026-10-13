@@ -22,6 +22,7 @@ An audio-reactive VJ playground for REAPER: a lightweight native CLAP effect str
 - **Explore MilkDrop and shaders:** bundled Butterchurn presets plus seven visual types: spectrum, oscilloscope, circle, tunnel, plasma, stars and grid, all modulated by Clubber-style 4D vectors (`[energy, envelope, trigger, pitch]`). Search presets, filter groups and save favorites.
 - **Perform with touch:** four assignable XY pads, spring return, effect faders and 16 momentary effects, including blackout, invert, kaleidoscope, RGB split, freeze and strobe.
 - **Paint with images:** five image layers with drag, pinch, rotation, opacity, six blend modes, tiling, hue, wobble and bass pulse. Trigger zoom, spin and flash shots; draw light with up to three fingers.
+- **Bring a camera in:** **📷 Cam** on the controller puts the live camera of that phone or tablet into an image slot, where it takes blend modes, tiling, hue and all effects like any picture. A webcam on the display computer works too.
 - **Tag the wall:** a switch turns the controller into a 16:9 canvas. Draw graffiti tags with your finger; a finished tag is mixed into the visuals and runs through mirror, kaleidoscope, colour and trails. Sixteen buttons replay, burst and wipe the tags, restyle them (pulse, drip, neon, glitch, rainbow), move them in time with the host (zoom, rotation, drift, wave, trail) or melt them into the picture (light, negative, melt).
 - **Shape the response:** Kick, Bass, Lead and Hats selectors with live level meters, beat trigger indicators and detected pitch note badges. Driven by Clubber-style musical frequency and transient analysis (not AI stem separation).
 - **Recall a look:** eight scene slots, beat-linked effects and visual state saved with the REAPER project. Favorites and pad assignments stay in the browser.
@@ -87,6 +88,14 @@ make install PICTURES=/absolute/path/to/your/images
 
 Only the first five image slots are shown at a time; each can select a file from the imported list. `make pictures` rebuilds the generated web image folder. It does not delete the source images. Demo images are separate public-domain works with [source credits](demo/CREDITS.md).
 
+### Live camera
+
+Select an image slot on the controller and tap **📷 Cam**: the slot now shows the camera of that device, **Flip** switches between back and front camera. Hold the slot to go back to a picture. One camera is shown at a time; every open display gets it.
+
+- **Phones and tablets need the internet link.** Browsers only hand out the camera on `https`, so open the controller through the `https://….trycloudflare.com` address (see below), not through `http://YOUR-COMPUTER-IP:8765`. The video itself still travels directly between the devices over WebRTC; expect a delay of a fraction of a second.
+- **A webcam on the display computer** is used when a slot is set to the camera and no phone is sending. The browser asks for permission once on `http://localhost:8765`.
+- Guests outside your network connect through a public STUN server (`stun.l.google.com`); some mobile networks block that and show no picture.
+
 ### Networking and compatibility
 
 The server binds to **all interfaces on port 8765**, without login or TLS. Use a trusted LAN: connected clients can receive audio, control visuals and read the served web assets, including imported images. Do not forward the port to the internet; use the internet link below instead. If a firewall is active, allow TCP 8765 from your tablet's LAN only.
@@ -136,7 +145,7 @@ make test
 VSTVIS_WEB_DIR="$PWD/web" tools/fakehost 0 build/clapvisualizer.clap
 ```
 
-`make test` covers native audio passthrough, state persistence, HTTP path handling, WebSocket framing and relay, browser-side analysis/state logic, and the clickable native window. [`tools/touchtest.js`](tools/touchtest.js) additionally exercises touch controls in landscape and portrait Chromium emulation; it needs a local Playwright installation. Real iPad Safari and other host/OS combinations are not certified by those tests.
+`make test` covers native audio passthrough, state persistence, HTTP path handling, WebSocket framing and relay, browser-side analysis/state logic, and the clickable native window. [`tools/touchtest.js`](tools/touchtest.js) additionally exercises touch controls in landscape and portrait Chromium emulation, and [`tools/camtest.js`](tools/camtest.js) sends Chromium's fake camera from a remote to three displays; both need a local Playwright installation. Real iPad Safari and other host/OS combinations are not certified by those tests.
 
 The [demos](https://github.com/goarstne/clap-visualizer/releases/tag/v1.1.0) use the real plugin in the test host, an original synthesized track, touch automation and public-domain images. They demonstrate the browser workflow rather than a screen recording of REAPER. See [demo recording instructions](docs/DEMO.md).
 

@@ -15,7 +15,7 @@
   // A page that stays open across an update keeps running old code and would send old state.
   // Every page hashes the served files when it loads and announces the hash on connect; a page
   // that hears a different hash checks the server again and reloads itself if it is the stale one.
-  const FILES = ['index.html', 'remote.html', 'ws.js', 'controls.js', 'engine.js', 'postfx.js', 'tags.js', 'viz.js'];
+  const FILES = ['index.html', 'remote.html', 'ws.js', 'controls.js', 'cam.js', 'engine.js', 'postfx.js', 'tags.js', 'viz.js'];
   async function signature() {
     let hash = 0;
     for (const file of FILES) {

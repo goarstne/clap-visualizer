@@ -24,7 +24,7 @@ iframe{border:0;width:100%;display:block}
 <script>
 // "Both" stacks the two pages: the display on top, the remote underneath.
 if (new URLSearchParams(location.search).has('both')) {
-  document.body.innerHTML = '<iframe id="display" src="index.html" title="Display" allow="fullscreen"></iframe><iframe id="remote" src="remote.html" title="Remote"></iframe>';
+  document.body.innerHTML = '<iframe id="display" src="index.html" title="Display" allow="fullscreen"></iframe><iframe id="remote" src="remote.html" title="Remote" allow="camera"></iframe>';
 }
 </script>
 </html>

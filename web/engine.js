@@ -20,6 +20,7 @@
     src: '', on: false, x: 0, y: 0, s: 0.6, r: 0, o: 1, m: 0, pulse: 0, spin: 0, top: false, tile: 1, hue: 0, wob: 0
   });
   const object = value => value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const CAM = '@cam';
   const clamp = (value, min, max, fallback) => Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
   const defaults = () => Object.fromEntries(Object.entries(ranges).map(([key, range]) => [key, range[2]]));
 
@@ -104,6 +105,14 @@
       this.pictures = []; this.images = ['', '', '', '', '']; this.imgHeld = [];
       this.layerNow = this.state.img.map(layer => ({ ...layer, gain: 0, angle: 0, shot: null }));
       this.touch = [0, 1, 2].map(() => ({ x: 0, y: 0, on: false, a: 0 }));
+      // Live camera for image slots set to '@cam': a phone's stream (cam.js), else a webcam on this computer.
+      this.camVideo = Object.assign(document.createElement('video'), { muted: true, playsInline: true, autoplay: true });
+      // Safari only decodes a video that is part of the page.
+      this.camVideo.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none';
+      canvas.parentNode.appendChild(this.camVideo);
+      this.camRemote = this.camLocal = null; this.camAsked = -Infinity; this.camTried = 0;
+      this.cam = root.VJCam && root.VJCam.supported
+        ? root.VJCam.receiver(message => this.socket.send(message), stream => { this.camRemote = stream; this.camSource(); }) : null;
       // Graffiti tags are mixed in by PostFX, so they need its canvas.
       this.tags = this.fx && root.VJTags ? root.VJTags.create() : null;
       this.spectrum = null; this.bands = { drums: 0, bass: 0, melody: 0 }; this.hit = { kick: 0, hats: 0 };
@@ -222,12 +231,45 @@
         const src = layer.src || this.pictures[i] || '';
         if (src === this.images[i] || !this.fx) return;
         this.images[i] = src;
-        if (!src) { this.fx.setImage(i, null); return; }
+        // The camera picture is uploaded every frame by camera().
+        if (!src || src === CAM) { this.fx.setImage(i, null); return; }
         // ponytail: full-size upload, images beyond the GPU texture limit (4096+) stay blank; downscale via canvas if needed.
         const image = new Image();
         image.onload = () => { if (this.images[i] === src) this.fx.setImage(i, image); };
         image.src = 'pictures/' + encodeURIComponent(src);
       });
+    }
+
+    camSource() {
+      const stream = this.camRemote || this.camLocal;
+      if (this.camVideo.srcObject === stream) return;
+      this.camVideo.srcObject = stream;
+      if (stream) this.camVideo.play().catch(() => {});
+      else this.images.forEach((src, i) => { if (src === CAM && this.fx) this.fx.setImage(i, null); });
+    }
+
+    camera(now) {
+      if (!this.fx) return;
+      const used = this.images.includes(CAM);
+      if (!used || this.camRemote) {
+        // No slot shows the camera, or a phone has taken over: switch the webcam off.
+        if (this.camLocal) { for (const track of this.camLocal.getTracks()) track.stop(); this.camLocal = null; this.camSource(); }
+        this.camTried = 0;
+        if (!used) return;
+      }
+      const video = this.camVideo, live = video.srcObject && video.readyState >= 2 && video.videoWidth > 0;
+      if (now - this.camAsked >= 3000) {
+        this.camAsked = now;
+        // Remotes draw the camera box in the shape of the picture.
+        if (live || (this.cam && !this.camRemote)) this.socket.send({
+          type: 'cam', ...(this.cam && !this.camRemote ? { want: this.cam.id } : {}), ...(live ? { aspect: video.videoWidth / video.videoHeight } : {})
+        });
+        // A phone gets one round to answer before this computer asks for its own webcam.
+        if (!this.camRemote && !this.camLocal && navigator.mediaDevices && ++this.camTried === 2) {
+          navigator.mediaDevices.getUserMedia({ video: true }).then(stream => { this.camLocal = stream; this.camSource(); }).catch(() => {});
+        }
+      }
+      if (live) this.images.forEach((src, i) => { if (src === CAM) this.fx.setImage(i, video); });
     }
 
     sendState() { this.socket.send({ type: 'state', ...this.state }); }
@@ -243,6 +285,7 @@
         this.imgHeld = []; for (const layer of this.layerNow) layer.shot = null;
         for (const point of this.touch) point.on = false;
         this.pending.clear(); this.transport.playing = false; this.lastAudio = -Infinity;
+        if (this.cam) this.cam.drop();
       }
     }
 
@@ -313,6 +356,10 @@
           point.on = Array.isArray(message.v);
           if (point.on) { point.x = clamp(message.v[0], -1, 1, 0); point.y = clamp(message.v[1], -1, 1, 0); }
         }
+      } else if (message.type === 'cam') {
+        // A camera that has just started is asked for its picture right away.
+        if (message.on === true) this.camAsked = -Infinity;
+        if (this.cam) this.cam.message(message).catch(() => {});
       } else if (message.type === 'tag') {
         if (this.tags && this.tags.add(message.strokes, now)) this.socket.send({ type: 'tags', n: this.tags.count() });
       } else if (message.type === 'trig' && ['swap', 'load', 'scene', 'next', 'prev', 'random', 'title', 'show', 'img', 'tag'].includes(message.k)) {
@@ -565,6 +612,7 @@
       const clock = this.transport.playing && this.transport.bpm > 0 ? beat : now / 500;
       const tagCanvas = this.tags && this.tags.render(now, this.state.tag, pulse, clock) ? this.tags.canvas : null;
       const tagBlend = this.state.tag.melt ? 3 : this.state.tag.diff ? 2 : this.state.tag.add ? 1 : 0;
+      this.camera(now);
       if (this.fx) {
         this.fx.render(sourceA, sourceB, {
           ...this.frameFX, mix: this.mix, tag: tagCanvas, tagBlend, layers: this.layers(dt, now), touch: this.touch, time: now / 1000 % 3600, kaleido: this.held.kaleido ? 6 : Math.round(this.frameFX.kaleido),
@@ -580,6 +628,9 @@
     destroy() {
       root.cancelAnimationFrame(this.animation); clearTimeout(this.initialStateTimer);
       root.removeEventListener('resize', this.onResize); this.socket.destroy();
+      if (this.cam) this.cam.drop();
+      if (this.camLocal) for (const track of this.camLocal.getTracks()) track.stop();
+      this.camVideo.remove();
       if (this.fx) this.fx.destroy();
       for (const deck of this.decks) if (deck.viz) deck.viz.destroy();
     }

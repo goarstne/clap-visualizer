@@ -372,6 +372,8 @@ body.canvas-on main { display: none; }
             <button id="btn-i-reset">Reset</button>
             <button id="btn-i-off">All off</button>
             <button id="btn-i-top" title="The image stays unchanged on top of kaleidoscope, colour and trails">Above FX</button>
+            <button id="btn-i-cam" title="Shows the camera of this device in the selected image slot. Hold the slot to go back to a picture">📷 Cam</button>
+            <button id="btn-i-flip" title="Front or back camera">Flip</button>
           </div>
           <div class="img-stage" id="img-stage"></div>
           <div style="font-size:10px; color:var(--text-muted); text-align:center;" id="img-hint"></div>
@@ -424,6 +426,7 @@ body.canvas-on main { display: none; }
   <script src="ws.js"></script>
   <script src="viz.js"></script>
   <script src="controls.js"></script>
+  <script src="cam.js"></script>
   <script>
 (function () {
   'use strict';
@@ -595,6 +598,9 @@ body.canvas-on main { display: none; }
         const waiting = typeof msg.beats==='number' && msg.beats>0;
         el('pending').style.display = waiting ? 'inline' : 'none';
         if(waiting) el('pending').textContent = `⏳ ${String(msg.k).toUpperCase()} in ${msg.beats.toFixed(1)}`;
+      } else if(msg.type==='cam') {
+        if(msg.aspect>0 && msg.aspect!==aspects[CAM]) { aspects[CAM]=msg.aspect; renderImgUI(); }
+        if(camSender) camSender.message(msg).catch(()=>{});
       } else if(msg.type==='tags') {
         el('tag-count').textContent = `Wall: ${msg.n} tag${msg.n===1?'':'s'}`;
       } else if(msg.type==='bands') {
@@ -715,8 +721,24 @@ body.canvas-on main { display: none; }
 
   // IMAGES
   const imgSlots=[], stageEls=[], shots=[];
-  let pics=[], imgSel=0, imgHold=false, lightMode=false, aspects={};
+  const CAM = '@cam';
+  let pics=[], imgSel=0, imgHold=false, lightMode=false, aspects={[CAM]:16/9}, camSender=null, camFront=false;
   const imgUrl = src => 'pictures/'+encodeURIComponent(src);
+  // A camera slot has no file to show: a dark tile with the camera sign instead.
+  const imgBg = src => !src ? 'none' : src===CAM ? `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect width="48" height="48" fill="#1e293b"/><text x="24" y="32" font-size="22" text-anchor="middle">📷</text></svg>')}")` : `url("${imgUrl(src)}")`;
+  // Starts or stops sending this device's camera; browsers only allow it on https or localhost.
+  async function camToggle(on) {
+    if(camSender) { camSender.stop(); camSender=null; }
+    if(on) {
+      if(!navigator.mediaDevices || !VJCam.supported) { showToast('Camera needs the https internet link'); return; }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:camFront?'user':'environment', width:{ideal:1280}, height:{ideal:720}}});
+        camSender = VJCam.sender(stream, m=>socket.send(m));
+        if(imgSrc(imgSel)!==CAM) { state.img[imgSel].src=CAM; socket.sendState(state); }
+      } catch(e) { showToast('Camera not available: '+(e.name||e)); }
+    }
+    renderImgUI();
+  }
   const imgSrc = i => state.img[i].src || pics[i] || '';
   const aspectOf = src => {
     if(!aspects[src]) { aspects[src]=1; const i=new Image(); i.onload=()=>{aspects[src]=i.naturalWidth/i.naturalHeight; renderImgUI();}; i.src=imgUrl(src); }
@@ -807,11 +829,13 @@ body.canvas-on main { display: none; }
   el('btn-i-fill').onclick = () => { const a=aspectOf(imgSrc(imgSel)); Object.assign(state.img[imgSel],{x:0,y:0,r:0,s:Math.max(STAGE_ASPECT/a, a/STAGE_ASPECT)}); socket.sendState(state); renderImgUI(); };
   el('btn-i-top').onclick = () => { state.img[imgSel].top=!state.img[imgSel].top; socket.sendState(state); renderImgUI(); };
   el('btn-i-reset').onclick = () => { Object.assign(state.img[imgSel], {...IMG_DEFAULT, src:state.img[imgSel].src, on:state.img[imgSel].on}); socket.sendState(state); renderImgUI(); };
+  el('btn-i-cam').onclick = () => camToggle(!camSender);
+  el('btn-i-flip').onclick = () => { camFront=!camFront; if(camSender) camToggle(true); else showToast(camFront?'Front camera':'Back camera'); };
   el('btn-i-off').onclick = () => { state.img.forEach(l=>l.on=false); socket.sendState(state); renderImgUI(); };
 
   function renderImgUI() {
     for(let i=0;i<5;i++) {
-      const ly=state.img[i], src=imgSrc(i), u = src?`url("${imgUrl(src)}")`:'none';
+      const ly=state.img[i], src=imgSrc(i), u = imgBg(src);
       imgSlots[i].style.backgroundImage = u; imgSlots[i].classList.toggle('on', ly.on); imgSlots[i].classList.toggle('sel', i===imgSel);
       shots[i].style.backgroundImage = u;
       const bx=stageEls[i], a=src?aspectOf(src):1, h=ly.s*Math.min(1, STAGE_ASPECT/a);
@@ -824,7 +848,7 @@ body.canvas-on main { display: none; }
     iPads.forEach((p,i) => { if(!p.isInteracting) p.setValues(ly[IMG_PADS[i][0]], ly[IMG_PADS[i][1]]); });
     modeBtns.forEach((b,i)=>b.classList.toggle('active',ly.m===i));
     el('btn-i-hold').classList.toggle('active', imgHold); el('btn-i-light').classList.toggle('active', lightMode); stg.classList.toggle('light', lightMode);
-    el('btn-i-top').classList.toggle('active', ly.top);
+    el('btn-i-top').classList.toggle('active', ly.top); el('btn-i-cam').classList.toggle('active', !!camSender);
     el('btn-i-hold').textContent = imgHold ? 'Hold' : 'Latch';
     el('img-hint').textContent = lightMode ? 'Light: up to 3 fingers paint light and ripples into the picture'
       : '1 finger moves · 2 fingers zoom/rotate · double tap centres';

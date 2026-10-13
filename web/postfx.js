@@ -375,12 +375,12 @@
     }
   };
 
-  // source: loaded HTMLImageElement / canvas, or null to clear the layer.
+  // source: loaded HTMLImageElement / canvas / playing video, or null to clear the layer.
   PostFX.prototype.setImage = function (index, source) {
     if (this.destroyed || index < 0 || index >= LAYERS) return;
     this.imgSource[index] = source || null;
     this.imgAspect[index] = source
-      ? (source.naturalWidth || source.width || 1) / (source.naturalHeight || source.height || 1) : 0;
+      ? (source.naturalWidth || source.videoWidth || source.width || 1) / (source.naturalHeight || source.videoHeight || source.height || 1) : 0;
     if (this.lost || !source) return;
     var gl = this.gl;
     gl.activeTexture(gl.TEXTURE0 + IMAGE_UNIT + index);
