@@ -5,6 +5,7 @@ node_modules/
 .playwright-mcp/
 tools/fakehost
 tools/guitest
+tools/linkpeer
 web/pictures/
 web/vendor/depth/
 

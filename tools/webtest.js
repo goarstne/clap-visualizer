@@ -215,3 +215,49 @@ assert.strictEqual(viz.rename('Sterne'), 'Sterne');
 const renamed = normalize({ v: 2, deckA: '◆ Gitter', favs: ['◆ Kreis', 'x'], scenes: [{ deckA: '◆ Spektrum', deckB: 'b' }] }, {}, viz.names);
 assert(renamed.deckA === '◆ Grid' && renamed.favs[0] === '◆ Circle' && renamed.scenes[0].deckA === '◆ Spectrum' && renamed.scenes[0].deckB === 'b');
 console.log('Legacy shader names: mapped to the English ones OK');
+
+// Auto mode: phrase rules over 64 bars with a fixed random sequence, then the director in a stub engine.
+{
+  const { autoPlan, autoLook } = global.window.VJEngine;
+  let seed = 7; const rng = () => (seed = seed * 1664525 + 1013904223 >>> 0) / 2 ** 32;
+  const manual = ['strobe', 'black', 'freeze', 'flash'], fills = { 1.4: 0, 1: 0, 0.4: 0 };
+  for (const energy of [1, 1.4, 0.4]) for (let bar = 0; bar < 64; bar++) {
+    const plan = autoPlan(bar, energy, rng);
+    if (bar % 16 === 0) assert(plan.preset, 'new preset every 16 bars');
+    if (plan.preset) assert(bar % 16 === 0 || (bar % 8 === 0 && energy > 1.15));
+    assert.strictEqual(!!plan.look, bar % 8 === 0);
+    if (energy < 0.7) assert(!plan.fill && !plan.section && !plan.shot, 'breaks stay calm');
+    if (plan.fill) { fills[energy]++; assert(bar % 4 === 3 && plan.fill[1] <= 2); }
+    for (const item of [plan.fill, plan.section]) if (item) assert(!manual.includes(item[0]));
+  }
+  assert(fills[1.4] > fills[1] && fills[0.4] === 0, JSON.stringify(fills));
+  for (let i = 0; i < 300; i++) {
+    const { fx, sync } = autoLook(i % 3 ? 1 : 0.5, rng), ranges = normalize({ v: 2, fx }).fx;
+    assert.deepStrictEqual(Object.fromEntries(Object.keys(fx).map(key => [key, ranges[key]])), fx, 'look within ranges');
+    assert(!('gain' in fx) && !('bass' in fx));
+    assert(['kaleido', 'mirror', 'trails', 'warp'].filter(key => fx[key]).length <= 1, 'one strong effect at most');
+    assert(Object.values(sync).every(period => ['1', '2'].includes(period)));
+    if (i % 3 === 0) assert(!Object.keys(sync).length && fx.speed <= 0.85, 'a calm look in breaks');
+  }
+
+  const test = Object.create(Engine.prototype), executed = [], pressed = new Set();
+  let sent = 0;
+  Object.assign(test, { state: normalize({ v: 2, fx: { gain: 1.5, kaleido: 3 }, sync: { hue: '4' } }), held: {}, images: ['a.jpg', '', '', '', ''], tags: null,
+    transport: { playing: true, bpm: 90, beat: 0, tsNum: 4, tsDen: 4 }, transportAt: 0, bands: { drums: 0.5, bass: 0.5 }, flashes: [], flashAt: -Infinity,
+    layerNow: normalize({ v: 2 }).img.map(layer => ({ ...layer, gain: 0, angle: 0, shot: null })),
+    execute: message => executed.push(message.k), sendState: () => sent++, syncImages: () => {} });
+  const before = JSON.parse(JSON.stringify(test.state));
+  test.state.auto = true; test.autoStart(0);
+  for (let now = 0; now < 64 * 4 / 1.5 * 1000; now += 1000 / 60) {
+    test.autoplay(now, now / 1000 * 1.5, 1 / 60);
+    for (const [key, on] of Object.entries(test.held)) if (on) pressed.add(key);
+  }
+  assert.deepStrictEqual(executed, ['random', 'random', 'random'], 'presets at bars 16, 32 and 48');
+  assert(sent >= 4 && test.state.fx.gain === 1.5, 'looks are sent, the gain stays');
+  assert(pressed.size > 0 && [...pressed].every(key => !manual.includes(key)), [...pressed].join());
+  test.state.fx.gain = 2; test.state.auto = false; test.autoStop();
+  assert(Object.values(test.held).every(on => !on), 'nothing stays held');
+  assert.deepStrictEqual({ ...test.state.fx, gain: 1.5 }, before.fx, 'auto off brings the effects back');
+  assert(test.state.fx.gain === 2 && test.state.sync.hue === '4' && !test.state.img[0].on);
+  console.log('Auto mode: phrase rules, calm breaks, looks in range, held effects released, settings restored OK');
+}

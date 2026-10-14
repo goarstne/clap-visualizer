@@ -21,6 +21,7 @@ An audio-reactive VJ playground for REAPER: a lightweight native CLAP effect str
 - **Mix two visual decks:** A/B crossfader, timed transitions, automatic switching and beat/bar quantization driven by host transport.
 - **Explore MilkDrop and shaders:** bundled Butterchurn presets plus seven visual types: spectrum, oscilloscope, circle, tunnel, plasma, stars and grid, all modulated by Clubber-style 4D vectors (`[energy, envelope, trigger, pitch]`). Search presets, filter groups and save favorites.
 - **Perform with touch:** four assignable XY pads, spring return, effect faders and 16 momentary effects, including blackout, invert, kaleidoscope, RGB split, freeze and strobe.
+- **Let it run by itself:** the **🤖 Auto** switch hands the show to the display, tuned for hip-hop. It thinks in bars and phrases: a new look every 8 bars (speed, colour, one strong effect such as kaleidoscope, mirror or trails, a zoom that bounces on the beat), a new preset every 16 bars from your pool, short fills (shockwave, glitch, stutter …) at the end of every four bars, bigger moments and image shots when the drums hit harder than usual, now and then one of your images for 8 bars and a new graffiti look. Breaks stay calm. Strobe, blackout, freeze, stems and the camera stay with you, 🔒 Locked keeps the preset, and switching Auto off brings back your settings. With Link or the REAPER transport it hits the downbeat; without, it counts at 90 BPM.
 - **Play it like an instrument:** the **🎛 Perform** switch turns the controller into 96 pads (12 × 8 on a landscape tablet), coloured by function: presets from your favourites, the built-in shader visuals, effects that last as long as you hold them, kaleidoscope shapes, images with their blend modes and shots, camera and all graffiti tag looks. Hold **LOCK** and tap an effect to keep it on, press longer for a tooltip. Nothing switches by itself in this mode. Eight hard effects live only here: glitch, stutter, tunnel, neon edges, pixel, vortex, thermal and shockwave.
 - **Paint with images:** five image layers with drag, pinch, rotation, opacity, six blend modes, tiling, hue, wobble and bass pulse. Trigger zoom, spin and flash shots; draw light with up to three fingers.
 - **Bring a camera in:** **📷 Cam** on the controller puts the live camera of that phone or tablet into an image slot, where it takes blend modes, tiling, hue and all effects like any picture. A webcam on the display computer works too.
@@ -98,6 +99,31 @@ Select an image slot on the controller and tap **📷 Cam**: the slot now shows 
 - **Cam depth cut** keeps what is close to the camera and makes the background transparent, so the visuals run behind you. Raise the fader until only the foreground is left. The display computer estimates the depth of the camera picture with [Depth Anything V2 Small](https://github.com/DepthAnything/Depth-Anything-V2) on its CPU, a few times per second, and only while the fader is up. Run `make depth` once before `make install`: it downloads the model and onnxruntime-web (41 MB) into `web/vendor/depth/`. Without them the fader does nothing.
 - Guests outside your network connect through a public STUN server (`stun.l.google.com`); some mobile networks block that and show no picture.
 
+### Ableton Link: djay Pro, Traktor, Live
+
+The visuals can follow the tempo and bar of a DJ app over [Ableton Link](https://www.ableton.com/link/) instead of the REAPER transport, for example algoriddim **djay Pro** on a laptop, iPad or phone in the same network.
+
+1. Switch Link on in the DJ app first (djay Pro: settings, *Ableton Link*).
+2. Then tap **🔗 Link** on the controller. The status bar shows the tempo and `Link 1` for one connected app.
+
+While REAPER plays, its transport keeps priority; while it is stopped (for example when the DJ audio only comes in through an armed track), Link sets tempo, beat and bar. Quantized triggers, beat-synced effects and the beat pulse then land on the DJ's downbeat, with a bar of four beats. Link does not tell whether the DJ app plays, so the visuals keep running on its beat as long as a Link app is connected.
+
+The order matters: Link keeps the tempo of the session that has existed longer, so a visualizer switched on before the DJ app would set the DJ app to its own 120 BPM. That is why the switch is always off after REAPER opens a project. Link needs UDP multicast in the network (port 20808); some guest Wi-Fis block it.
+
+### Live mode: without REAPER
+
+For a DJ set the visualizer does not need a DAW. `make install` also installs a start window: run `clapvisualizer` or pick **CLAP Visualizer** in the app menu, then choose
+
+- **Live + Auto DJ** – Link and 🤖 Auto are on and the display opens full screen (Brave or Chromium in kiosk mode, with a profile of its own), so the visuals run by themselves,
+- **Live** – Link is on and you play the visuals from the controller, or
+- **DAW** to open REAPER as before.
+
+For both live modes a second list asks where the music comes from: an input of the sound card (the DJ mixer or djay goes into it), or *what plays on* an output. Both choices are remembered. Closing the small live window also closes the full-screen display.
+
+Live mode records the source with PipeWire (`pw-record`), runs the plugin in a small host of its own (`clapvisualizer-live`) and shows the plugin window with the links and QR codes. **Link is on from the start** here, so switch it on in djay before you start the visualizer. Without a Link app the visuals still react to the sound, with no beat grid. Closing the window ends live mode. The controller settings, favourites and scenes of live mode are kept in `~/.config/clapvisualizer/live.json`, separate from REAPER projects. REAPER with the plugin and live mode use the same port 8765, so run one at a time.
+
+The start window needs `zenity`, `jq` and PipeWire (`pw-record`, `pactl`). The single inputs of a Scarlett 2i2 are mono sources; the visuals then get the same signal on both sides.
+
 ### Networking and compatibility
 
 The server binds to **all interfaces on port 8765**, without login or TLS. Use a trusted LAN: connected clients can receive audio, control visuals and read the served web assets, including imported images. Do not forward the port to the internet; use the internet link below instead. If a firewall is active, allow TCP 8765 from your tablet's LAN only.
@@ -147,10 +173,10 @@ make test
 VSTVIS_WEB_DIR="$PWD/web" tools/fakehost 0 build/clapvisualizer.clap
 ```
 
-`make test` covers native audio passthrough, state persistence, HTTP path handling, WebSocket framing and relay, browser-side analysis/state logic, and the clickable native window. [`tools/touchtest.js`](tools/touchtest.js) additionally exercises touch controls in landscape and portrait Chromium emulation, and [`tools/camtest.js`](tools/camtest.js) sends Chromium's fake camera from a remote to three displays; both need a local Playwright installation. Real iPad Safari and other host/OS combinations are not certified by those tests. [`tools/depthtest.js`](tools/depthtest.js) checks the depth cut of the camera layer the same way. [`tools/perftest.js`](tools/perftest.js) plays the performance pads in an iPad 12.9" emulation.
+`make test` covers native audio passthrough, state persistence, HTTP path handling, WebSocket framing and relay, browser-side analysis/state logic, and the clickable native window. [`tools/touchtest.js`](tools/touchtest.js) additionally exercises touch controls in landscape and portrait Chromium emulation, and [`tools/camtest.js`](tools/camtest.js) sends Chromium's fake camera from a remote to three displays; both need a local Playwright installation. Real iPad Safari and other host/OS combinations are not certified by those tests. [`tools/depthtest.js`](tools/depthtest.js) checks the depth cut of the camera layer the same way. [`tools/perftest.js`](tools/perftest.js) plays the performance pads in an iPad 12.9" emulation. [`tools/linktest.js`](tools/linktest.js) (part of `make test`) lets a Link peer at 133 BPM drive the stopped test host, [`tools/livetest.js`](tools/livetest.js) does the same for live mode with audio on stdin.
 
 The [demos](https://github.com/goarstne/clap-visualizer/releases/tag/v1.1.0) use the real plugin in the test host, an original synthesized track, touch automation and public-domain images. They demonstrate the browser workflow rather than a screen recording of REAPER. See [demo recording instructions](docs/DEMO.md).
 
 ## License
 
-Project code is [MIT licensed](LICENSE). Bundled CLAP headers and Butterchurn libraries retain their accompanying licenses. Demo artwork attribution and public-domain information are listed in [media credits](demo/CREDITS.md).
+Project code is [MIT licensed](LICENSE). Bundled CLAP headers and Butterchurn libraries retain their accompanying licenses. The plugin is built with [Ableton Link](https://github.com/Ableton/link) (`third_party/link`, GPL-2.0-or-later, with asio under the Boost Software License), so the compiled `clapvisualizer.clap` as a whole is distributed under the GPL-2.0-or-later; the project's own source stays MIT. Demo artwork attribution and public-domain information are listed in [media credits](demo/CREDITS.md).

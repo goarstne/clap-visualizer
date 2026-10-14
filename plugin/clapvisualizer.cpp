@@ -1,4 +1,5 @@
 #include <clap/clap.h>
+#include <ableton/Link.hpp>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -573,7 +574,12 @@ struct Plugin {
         std::string pcm;
         double squaresL=0,squaresR=0,peak=0; uint64_t count=0;
         auto nextAudio=Clock::now(), nextTransport=nextAudio;
+        // Ableton Link (djay, Traktor, Live …) takes over the beat while the host does not play.
+        // It is off until the remote switches it on: Link lets the older session win, so an
+        // always-on plugin would pull a DJ app that joins later to its own 120 BPM.
+        uint64_t linkVersion=~uint64_t(0); bool wantLink=false;
         try {
+            ableton::Link link(120);
             while (!stop.load()) {
                 uint64_t r=read.load(std::memory_order_relaxed), w=write.load(std::memory_order_acquire);
                 bool listeners=false;
@@ -596,6 +602,13 @@ struct Plugin {
                 }
                 double tempo,position; bool play; uint32_t sig,seq;
                 do { seq=sequence.load(std::memory_order_acquire); tempo=bpm.load(); position=beat.load(); play=playing.load(); sig=signature.load(); } while ((seq&1) || seq!=sequence.load(std::memory_order_acquire));
+                if (link.isEnabled()!=wantLink) link.enable(wantLink);
+                int peers=wantLink ? int(link.numPeers()) : -1;
+                if (peers>0 && !play) {
+                    // Quantum 4: bar one of the display falls on the downbeat of the DJ app.
+                    auto session=link.captureAppSessionState();
+                    tempo=session.tempo(); position=session.beatAtTime(link.clock().micros(),4); play=true; sig=(4u<<16)|4;
+                }
                 auto now=Clock::now();
                 if (now>=nextAudio) {
                     nextAudio=now+std::chrono::microseconds(16667);
@@ -618,12 +631,14 @@ struct Plugin {
                         ",\"playing\":"+(play?"true":"false")+",\"beat\":"+number(position)+
                         ",\"tsNum\":"+std::to_string(sig>>16)+",\"tsDen\":"+std::to_string(sig&65535)+
                         ",\"rms\":"+number(std::min(1.0,rms))+",\"peak\":"+number(std::min(1.0,peak))+
-                        ",\"sampleRate\":"+number(sampleRate.load())+"}";
+                        ",\"sampleRate\":"+number(sampleRate.load())+",\"link\":"+std::to_string(peers)+"}";
                     for (Client &c:clients) if (c.ws) queue(c,frame(1,json));
                     squaresL=squaresR=peak=0; count=0;
                 }
                 { std::lock_guard<std::mutex> guard(stateMutex);
                     if (seenVersion!=stateVersion) { seenVersion=stateVersion; if (!state.empty()) for (Client &c:clients) if (c.ws) queue(c,frame(1,state)); }
+                    // The pages write the state with JSON.stringify, so the key has no spaces.
+                    if (linkVersion!=stateVersion) { linkVersion=stateVersion; wantLink=state.find("\"link\":true")!=std::string::npos; }
                 }
                 std::vector<pollfd> fds{{listener,POLLIN,0}};
                 for (Client &c:clients) fds.push_back({c.fd,short((!c.closing?POLLIN:0)|((c.sent<c.output.size() || c.file>=0)?POLLOUT:0)),0});
@@ -750,6 +765,12 @@ const clap_plugin_state_t stateExtension={
                 if (state.size()+n>Limit) return false;
                 state.append(buffer,n); }
             if (!utf8(state)) return false;
+            // Link starts off in a DAW project: switched on before the DJ app, it would hand the DJ app
+            // its own tempo. The live host (VSTVIS_LINK=1) is started for Link, so there it starts on.
+            bool live=std::getenv("VSTVIS_LINK"); const char *link=live ? "\"link\":true" : "\"link\":false";
+            size_t at=state.find("\"link\":"), length=at==std::string::npos ? 0 : !state.compare(at,11,"\"link\":true") ? 11 : !state.compare(at,12,"\"link\":false") ? 12 : 0;
+            if (length) state.replace(at,length,link);
+            else if (live && at==std::string::npos && state.size()>1 && state[0]=='{') state.insert(1,std::string(link)+",");
             auto &s=self(p); std::lock_guard<std::mutex> guard(s.stateMutex); s.state=std::move(state); ++s.stateVersion; return true;
         } catch (...) {return false;}
     }

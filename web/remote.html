@@ -43,8 +43,8 @@ button.active { border-color: var(--accent); color: var(--accent); background: r
 
 /* HEADER */
 header { display: flex; flex-direction: column; background: #10151e; border-bottom: 1px solid var(--card-border); flex-shrink: 0; }
-.hdr-top { display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; height: 50px; gap: 8px; }
-.hud-part { min-width: 0; white-space: nowrap; }
+.hdr-top { display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; height: 50px; gap: 8px; overflow-x: auto; }
+.hud-part { flex-shrink: 0; white-space: nowrap; }
 .hud-part { display: flex; align-items: center; gap: 8px; font-weight: bold; font-size: 13px; }
 .conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); }
 .conn-dot.ok { background: var(--success); box-shadow: 0 0 6px var(--success); }
@@ -262,6 +262,8 @@ body.perform-on main, body.perform-on #tagview { display: none; }
         <span id="pending"></span>
       </div>
       <button id="sw-canvas" class="sw" title="Switches between the controls and the graffiti wall"><span>🎨 Canvas</span><span class="sw-track"></span></button>
+      <button id="sw-link" class="sw" title="Ableton Link: takes tempo and bar from djay, Traktor or Live while REAPER is stopped. Switch it on in the DJ app first, then here."><span>🔗 Link</span><span class="sw-track"></span></button>
+      <button id="sw-auto" class="sw" title="Auto mode: the display runs the show by itself, in bars and phrases for hip-hop – new look every 8 bars, new preset every 16, fills, images and graffiti looks, calm in breaks. Strobe, blackout, freeze and the camera stay with you. Switching it off brings back your settings."><span>🤖 Auto</span><span class="sw-track"></span></button>
       <button id="sw-perform" class="sw" title="Switches between the controls and the performance pads"><span>🎛 Perform</span><span class="sw-track"></span></button>
       <div class="stems">
         <button id="stem-all" class="stem-btn active" title="Enable all stems">All</button>
@@ -600,7 +602,8 @@ body.perform-on main, body.perform-on #tagview { display: none; }
     onTransport: t => {
       const p = el('st-play');
       if(t.playing) { p.textContent='PLAY'; p.classList.add('play'); } else { p.textContent='STOP'; p.classList.remove('play'); }
-      el('st-bpm').textContent = (typeof t.bpm==='number'&&t.bpm>0) ? t.bpm.toFixed(1)+' BPM' : '-- BPM';
+      el('st-bpm').textContent = ((typeof t.bpm==='number'&&t.bpm>0) ? t.bpm.toFixed(1)+' BPM' : '-- BPM')
+        + (t.link>=0 ? ' · Link '+t.link : ''); // peers in the Link session; absent while Link is off
       if(typeof t.beat==='number') {
         const num = t.tsNum||4, den = t.tsDen||4, bpb = num*(4/den);
         const bar = Math.floor(t.beat/bpb)+1, bb = (Math.floor(t.beat)%Math.round(bpb))+1;
@@ -1258,11 +1261,13 @@ body.perform-on main, body.perform-on #tagview { display: none; }
       state.autoBars = 0; state.xfade = Math.round(state.xfade); socket.sendState(state); renderState();
     }
   }
+  onTap(el('sw-link'), () => { state.link = !state.link; socket.sendState(state); renderState(); showToast(state.link ? 'Link on' : 'Link off'); });
+  onTap(el('sw-auto'), () => { state.auto = !state.auto; socket.sendState(state); renderState(); showToast(state.auto ? 'Auto on – the display runs the show' : 'Auto off – your settings are back'); });
   onTap(el('sw-perform'), () => setView(document.body.classList.contains('perform-on') ? '' : 'perform'));
   window.addEventListener('resize', fitTagCanvas);
 
   function renderState() {
-    renderTagUI(); renderPads();
+    renderTagUI(); renderPads(); el('sw-link').classList.toggle('active', !!state.link); el('sw-auto').classList.toggle('active', !!state.auto);
     updateDeckThumb('A', state.deckA); updateDeckThumb('B', state.deckB);
     if(xfade&&!xfade.isInteracting) xfade.setValue(state.xfade); updateAudibility(state.xfade);
     el('sel-autoBars').value = state.autoBars;

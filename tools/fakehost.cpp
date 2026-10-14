@@ -89,6 +89,8 @@ int main(int argc,char **argv) {
         clap_event_transport_t transport{}; transport.header.size=sizeof(transport); transport.header.type=CLAP_EVENT_TRANSPORT;
         transport.flags=CLAP_TRANSPORT_HAS_TEMPO|CLAP_TRANSPORT_HAS_BEATS_TIMELINE|CLAP_TRANSPORT_HAS_TIME_SIGNATURE|CLAP_TRANSPORT_IS_PLAYING;
         transport.tempo=120; transport.tsig_num=transport.tsig_denom=4; proc.transport=&transport;
+        // A stopped host, as during a DJ set with input monitoring only.
+        if (std::getenv("VSTVIS_FAKE_STOPPED")) transport.flags&=~uint32_t(CLAP_TRANSPORT_IS_PLAYING);
         // Optional real programme material instead of the test kick: raw stereo float32 LE at 48 kHz, looped.
         std::vector<float> track;
         if (const char *file=std::getenv("VSTVIS_FAKE_AUDIO")) {

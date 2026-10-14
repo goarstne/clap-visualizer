@@ -1,0 +1,55 @@
+#!/bin/bash
+# Start window. DAW: opens REAPER, the visualizer runs as a plugin in the project. Live: takes a
+# sound card input or output directly and follows the DJ app over Ableton Link. Live + Auto DJ:
+# the same with auto mode on and the display full screen in its own browser window.
+set -u
+BIN=$(dirname "$(readlink -f "$0")")
+CONFIG=${XDG_CONFIG_HOME:-$HOME/.config}/clapvisualizer
+PORT=${VSTVIS_PORT:-8765}
+mkdir -p "$CONFIG"
+
+# zenity radio list: rows of "id<TAB>text"; the remembered id comes first and is selected.
+choose() {
+  local title=$1 text=$2 last=$3 first=() rest=() id label
+  while IFS=$'\t' read -r id label; do
+    if [ "$id" = "$last" ] || { [ ${#first[@]} -eq 0 ] && [ -z "$last" ]; }; then first=(TRUE "$id" "$label"); else rest+=(FALSE "$id" "$label"); fi
+  done
+  [ ${#first[@]} -eq 0 ] && { first=(TRUE "${rest[1]}" "${rest[2]}"); rest=("${rest[@]:3}"); }
+  zenity --list --radiolist --title="$title" --width=640 --height=420 --text="$text" \
+    --column="" --column=id --column="" --hide-column=2 --print-column=2 "${first[@]}" "${rest[@]}"
+}
+
+mode=$(printf '%s\t%s\n' \
+  auto "Live + Auto DJ – Ableton Link, auto mode, display full screen" \
+  live "Live – Ableton Link, you play the visuals from the controller" \
+  daw "DAW – open REAPER, the visualizer runs as a plugin in the project" \
+  | choose "CLAP Visualizer" "How do you want to start?" "$(cat "$CONFIG/mode" 2>/dev/null)") || exit 0
+[ -n "$mode" ] || exit 0
+echo "$mode" > "$CONFIG/mode"
+if [ "$mode" = daw ]; then exec setsid -f reaper; fi
+
+source=$(pactl -f json list sources | jq -r '.[] | [.name, if (.name | endswith(".monitor")) then "What plays on: " + (.description | sub("^Monitor of "; "")) else "Input: " + .description end] | @tsv' \
+  | choose "CLAP Visualizer – sound" "Where does the music come from?\nSwitch Ableton Link on in djay first." "$(cat "$CONFIG/last" 2>/dev/null)") || exit 0
+[ -n "$source" ] || exit 0
+echo "$source" > "$CONFIG/last"
+
+[ "$mode" = auto ] && export VSTVIS_AUTO=1
+pw-record --target "$source" --rate 48000 --channels 2 --format f32 - | "$BIN/clapvisualizer-live" &
+live=$!
+if [ "$mode" = auto ]; then
+  for _ in $(seq 50); do curl -sf -o /dev/null "http://localhost:$PORT/" && break; sleep 0.1; done
+  # A browser instance of its own, so the kiosk flags apply and the usual windows stay as they are.
+  browser=$(command -v brave || command -v chromium || command -v google-chrome-stable)
+  if [ -n "$browser" ]; then
+    # Brave's analytics notice would sit on top of the visuals; acknowledge it in the new profile.
+    [ -e "$CONFIG/browser/Local State" ] || { mkdir -p "$CONFIG/browser"; echo '{"brave":{"p3a":{"enabled":false,"notice_acknowledged":true}}}' > "$CONFIG/browser/Local State"; }
+    "$browser" --user-data-dir="$CONFIG/browser" --no-first-run --no-default-browser-check --hide-crash-restore-bubble --kiosk --app="http://localhost:$PORT/" >/dev/null 2>&1 &
+    display=$!
+  else
+    xdg-open "http://localhost:$PORT/"
+  fi
+fi
+wait "$live"
+# Closing the live window also closes the full-screen display.
+[ -n "${display:-}" ] && kill "$display" 2>/dev/null
+exit 0

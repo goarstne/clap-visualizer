@@ -52,7 +52,7 @@
     state.blend = clamp(state.blend, 0, 10, 2);
     if (!['off', 'beat', 'bar', '4bar'].includes(state.quant)) state.quant = 'bar';
     if (![0, 4, 8, 16, 32].includes(state.autoBars)) state.autoBars = 8;
-    state.random = !!state.random; state.locked = !!state.locked;
+    state.random = !!state.random; state.locked = !!state.locked; state.auto = !!state.auto;
     const scenes = Array.isArray(raw.scenes) ? raw.scenes : previous.scenes || [];
     state.scenes = Array.from({ length: 8 }, (_, i) => scenes[i] && typeof scenes[i] === 'object'
       ? { ...scenes[i], deckA: rename(scenes[i].deckA), deckB: rename(scenes[i].deckB) } : null);
@@ -77,6 +77,51 @@
     const bar = Math.max(1, numerator || 4) * 4 / Math.max(1, denominator || 4);
     const step = quant === 'beat' ? 1 : quant === 'bar' ? bar : quant === '4bar' ? 4 * bar : 0;
     return step ? (Math.floor(beat / step) + 1) * step : beat;
+  }
+
+  // Auto mode: a director for hip-hop sets that thinks in bars and phrases. New look every 8 bars,
+  // new preset every 16, a fill at the end of every 4 bars, bigger moments when the drums hit
+  // harder than usual, nothing busy in breaks. Strobe, blackout, freeze and the camera stay manual.
+  const pick = (list, rng) => list[Math.floor(rng() * list.length)];
+  const between = (min, max, rng) => +(min + (max - min) * rng()).toFixed(2);
+  // [effect, beats]: fills end on the next downbeat, sections last one bar.
+  const fills = [['shock', 1], ['glitch', 1], ['rgb', 1], ['zoom', 1], ['kick', 0.5], ['shake', 0.5], ['stutter', 2], ['pixel', 1], ['invert', 0.5], ['spin', 2], ['mono', 2]];
+  const sections = [['tunnel', 4], ['vortex', 4], ['edges', 4], ['thermal', 4], ['kaleido', 4], ['mirror', 4], ['trails', 4]];
+  const tagMotion = ['pulse', 'drip', 'neon', 'glitch', 'rainbow', 'zoom', 'spin', 'drift', 'wave', 'trail'];
+
+  // energy: drums and bass now against the last 20 s; below 0.7 is a break, above 1.15 a drop.
+  function autoPlan(bar, energy, rng = Math.random) {
+    const calm = energy < 0.7, hot = energy > 1.15, plan = {};
+    if (bar % 16 === 0 || (bar % 8 === 0 && hot && rng() < 0.4)) plan.preset = true;
+    if (bar % 8 === 0) plan.look = true;
+    if (bar % 16 === 0 && rng() < 0.35) plan.image = true;
+    if (bar % 16 === 8 && rng() < 0.4) plan.tag = true;
+    if (calm) return plan;
+    if (bar % 4 === 3 && rng() < (hot ? 0.8 : 0.5)) plan.fill = pick(fills, rng);
+    if (bar % 8 === 0 && hot && rng() < 0.5) plan.section = pick(sections, rng);
+    if (bar % 8 === 0 && hot && rng() < 0.4) plan.shot = pick(['zoom', 'spin', 'flash'], rng);
+    return plan;
+  }
+
+  // Effect targets and beat sync for one phrase. Gain and the band levels stay as the DJ set them.
+  function autoLook(energy, rng = Math.random) {
+    const fx = { speed: energy > 1.15 ? between(1, 1.3, rng) : energy < 0.7 ? between(0.6, 0.85, rng) : between(0.8, 1.1, rng),
+      sat: between(1, 1.4, rng), contrast: between(1, 1.25, rng), bright: 1, hue: rng() < 0.4 ? Math.round(between(0, 359, rng)) : 0,
+      kaleido: 0, mirror: 0, trails: 0, rgb: 0, warp: 0, zoom: 0, rot: 0, dx: 0, dy: 0 }, sync = {};
+    // At most one strong effect, so the preset stays recognisable.
+    const main = pick(['none', 'none', 'kaleido', 'mirror', 'trails', 'rgb', 'warp'], rng);
+    if (main === 'kaleido') fx.kaleido = pick([4, 6, 8], rng);
+    if (main === 'mirror') fx.mirror = pick([1, 2, 3], rng);
+    if (main === 'trails') fx.trails = between(0.4, 0.75, rng);
+    if (main === 'rgb') fx.rgb = between(0.15, 0.35, rng);
+    if (main === 'warp') fx.warp = between(0.3, 0.6, rng);
+    if (rng() < 0.5) fx.zoom = between(0.1, 0.35, rng);
+    if (rng() < 0.4) fx.rot = between(0.1, 0.3, rng) * (rng() < 0.5 ? -1 : 1);
+    // Bounce: the zoom pumps on every beat, or an RGB split on every second beat.
+    if (energy >= 0.7 && rng() < 0.6) {
+      if (rng() < 0.6) { fx.zoom = Math.max(fx.zoom, 0.4); sync.zoom = '1'; } else { fx.rgb = Math.max(fx.rgb, 0.3); sync.rgb = '2'; }
+    }
+    return { fx, sync };
   }
 
   class Engine {
@@ -123,6 +168,7 @@
       this.flashes = []; this.flashAt = this.kickAt = -Infinity; this.strobeStep = null;
       this.transition = null; this.lastFrame = performance.now(); this.lastPending = 0;
       this.lastAutoBar = null; this.lastSwitch = this.lastFrame; this.hasState = false;
+      this.auto = null;
       const scale = Number(new URLSearchParams(root.location.search).get('scale'));
       this.scale = Number.isFinite(scale) && scale > 0 ? Math.min(scale, 1) : 1;
       this.ratio = Math.min(root.devicePixelRatio || 1, 2);
@@ -216,6 +262,7 @@
     }
 
     applyState(incoming) {
+      const wasAuto = this.state.auto;
       this.state = normalize(incoming, this.state, this.names);
       for (let i = 0; i < 2; i++) {
         const name = this.state['deck' + this.decks[i].letter];
@@ -225,6 +272,79 @@
       this.syncImages();
       this.transition = null; this.lastSwitch = performance.now();
       this.lastAutoBar = Math.floor(this.beatNow() / this.beatsPerBar());
+      if (this.state.auto && !wasAuto) this.autoStart();
+      if (!this.state.auto && wasAuto) this.autoStop();
+    }
+
+    // Keeps what auto mode will change, so switching it off brings the set back.
+    autoStart(now = performance.now()) {
+      const { fx, sync, blend, img, tag } = JSON.parse(JSON.stringify(this.state));
+      this.auto = { saved: { fx, sync, blend, img, tag }, since: now, bar: null, queue: [], image: null, short: 0, long: 0 };
+    }
+
+    autoStop() {
+      if (!this.auto) return;
+      for (const item of this.auto.queue) if (item.on) this.held[item.key] = false;
+      const saved = this.auto.saved; this.auto = null;
+      // The DJ's gain and band levels may have changed meanwhile and stay.
+      for (const key of ['gain', 'bass', 'mid', 'treb']) saved.fx[key] = this.state.fx[key];
+      Object.assign(this.state, saved);
+      this.target = { ...this.state.fx }; this.syncImages(); this.sendState();
+    }
+
+    autoplay(now, beat, dt) {
+      const auto = this.auto;
+      if (!auto) return;
+      const level = (this.bands.drums || 0) + (this.bands.bass || 0);
+      auto.short += (level - auto.short) * (1 - Math.exp(-dt / 1.5));
+      // For the first 10 s the long average follows directly and the set counts as normal.
+      const warm = now - auto.since < 10000;
+      auto.long = warm ? auto.short : auto.long + (level - auto.long) * (1 - Math.exp(-dt / 20));
+      const energy = warm ? 1 : auto.short / Math.max(0.02, auto.long);
+      // Without a host transport or Link the director counts bars at 90 BPM.
+      const playing = this.transport.playing && this.transport.bpm > 0, perBar = this.beatsPerBar();
+      const beats = playing ? beat : (now - auto.since) / 1000 * 1.5, bar = Math.floor(beats / perBar);
+      for (const item of auto.queue) {
+        if (!item.on && beats >= item.start && beats < item.end && !this.held[item.key]) { item.on = true; this.moment(item.key, true, now); }
+        if (beats >= item.end || beats < item.start - 2 * perBar) { if (item.on) this.moment(item.key, false, now); item.done = true; }
+      }
+      auto.queue = auto.queue.filter(item => !item.done);
+      if (bar === auto.bar) return;
+      const first = auto.bar === null; auto.bar = bar;
+      this.autoBar(first ? { look: true } : autoPlan(bar, energy, Math.random), bar * perBar, perBar, energy, now);
+    }
+
+    autoBar(plan, start, perBar, energy, now, rng = Math.random) {
+      const auto = this.auto, state = this.state;
+      if (plan.fill) auto.queue.push({ key: plan.fill[0], start: start + perBar - plan.fill[1], end: start + perBar });
+      if (plan.section) auto.queue.push({ key: plan.section[0], start, end: start + plan.section[1] });
+      const pictures = this.images.map((src, i) => src && src !== CAM ? i : -1).filter(i => i >= 0);
+      if (plan.shot && pictures.length) this.shot(pick(pictures, rng), plan.shot, now);
+      let changed = false;
+      if (plan.look) {
+        const look = autoLook(energy, rng);
+        Object.assign(state.fx, look.fx); state.sync = look.sync; this.target = { ...state.fx }; changed = true;
+      }
+      // An image layer comes in for 8 bars.
+      if (auto.image && auto.bar >= auto.image.until) { state.img[auto.image.slot].on = false; auto.image = null; changed = true; }
+      if (plan.image && !auto.image) {
+        const free = pictures.filter(i => !state.img[i].on);
+        if (free.length) {
+          const slot = pick(free, rng);
+          Object.assign(state.img[slot], { on: true, m: pick([0, 1, 2, 5], rng), s: between(0.4, 0.9, rng), x: between(-0.3, 0.3, rng), y: between(-0.3, 0.3, rng),
+            r: 0, o: between(0.8, 1, rng), pulse: between(0.3, 0.6, rng), spin: pick([0, 0, 0.2, -0.2], rng), tile: pick([1, 1, 1, 2, 3], rng), hue: 0, wob: between(0, 0.3, rng), top: false });
+          auto.image = { slot, until: auto.bar + 8 }; changed = true;
+        }
+      }
+      // Graffiti looks only matter once something is on the wall.
+      if (plan.tag && this.tags && this.tags.count() > 0) {
+        const tag = Object.fromEntries(tagModes.map(key => [key, false]));
+        tag[pick(tagMotion, rng)] = true; if (rng() < 0.5) tag[pick(tagMotion, rng)] = true;
+        const blend = pick(['', '', 'add', 'diff', 'melt'], rng); if (blend) tag[blend] = true;
+        state.tag = tag; changed = true;
+      }
+      if (plan.preset && !state.locked) { state.blend = pick([1, 2, 2, 4], rng); this.execute({ k: 'random' }, now); }
+      else if (changed) this.sendState();
     }
 
     // Slot i shows its stored file, or by default the i-th file of pictures/index.json.
@@ -290,6 +410,7 @@
         this.imgHeld = []; for (const layer of this.layerNow) layer.shot = null;
         for (const point of this.touch) point.on = false;
         this.pending.clear(); this.transport.playing = false; this.lastAudio = -Infinity;
+        if (this.auto) this.auto.queue = [];
         if (this.cam) this.cam.drop();
       }
     }
@@ -332,26 +453,13 @@
           if (range) this.target[key] = clamp(message.v, range[0], range[1], this.target[key]);
         } else if (typeof message.k === 'string' && message.k.startsWith('m.')) {
           const key = message.k.slice(2);
-          if (!moments.includes(key)) return;
-          const pressed = message.v === 1;
-          if (pressed && !this.held[key]) {
-            if (key === 'flash') this.flash(now);
-            if (key === 'kick') this.kickAt = now;
-            if (key === 'strobe') this.strobeStep = Math.floor(this.beatNow(now) * 2);
-          }
-          this.held[key] = pressed;
+          if (moments.includes(key)) this.moment(key, message.v === 1, now);
         } else if (typeof message.k === 'string' && message.k.startsWith('img.')) {
           const [, slot, key] = message.k.split('.'), layer = this.state.img[Number(slot)];
           if (!layer) return;
           if (key === 'on') this.imgHeld[Number(slot)] = message.v === 1;
           else if (key === 'shot') {
-            const current = this.layerNow[Number(slot)];
-            if (message.v === 1 && !current.shot) {
-              const routine = ['zoom', 'spin', 'flash'].includes(message.r) ? message.r : 'zoom';
-              current.shot = { routine, start: now, duration: { zoom: 350, spin: 600, flash: 500 }[routine] };
-              current.gain = 1;
-              if (routine === 'flash') this.flash(now);
-            }
+            if (message.v === 1) this.shot(Number(slot), message.r, now);
             this.imgHeld[Number(slot)] = message.v === 1;
           }
           else if (imgRanges[key]) layer[key] = clamp(message.v, imgRanges[key][0], imgRanges[key][1], layer[key]);
@@ -378,6 +486,25 @@
           });
         }
       }
+    }
+
+    moment(key, pressed, now) {
+      if (pressed && !this.held[key]) {
+        if (key === 'flash') this.flash(now);
+        if (key === 'kick') this.kickAt = now;
+        if (key === 'strobe') this.strobeStep = Math.floor(this.beatNow(now) * 2);
+      }
+      this.held[key] = pressed;
+    }
+
+    // Shows an image layer for one short routine, whether it is switched on or not.
+    shot(slot, routine, now) {
+      const current = this.layerNow[slot];
+      if (!current || current.shot) return;
+      routine = ['zoom', 'spin', 'flash'].includes(routine) ? routine : 'zoom';
+      current.shot = { routine, start: now, duration: { zoom: 350, spin: 600, flash: 500 }[routine] };
+      current.gain = 1;
+      if (routine === 'flash') this.flash(now);
     }
 
     swap(now, destination = this.mix < 0.5 ? 1 : 0) {
@@ -465,7 +592,8 @@
         }
       }
       if (now - this.lastPending >= 200) this.lastPending = now;
-      if (!this.state.autoBars || this.state.locked || this.transition) return;
+      // Auto mode changes presets itself.
+      if (!this.state.autoBars || this.state.locked || this.transition || this.auto) return;
       const bar = Math.floor(beat / this.beatsPerBar());
       if (this.transport.playing && this.transport.bpm > 0) {
         if (this.lastAutoBar !== null && bar !== this.lastAutoBar && bar % this.state.autoBars === 0) {
@@ -587,7 +715,7 @@
 
     tick(now) {
       const dt = Math.max(0.001, Math.min(0.1, (now - this.lastFrame) / 1000)); this.lastFrame = now;
-      const beat = this.beatNow(now); this.actions(now, beat); this.effects(dt, beat);
+      const beat = this.beatNow(now); this.actions(now, beat); this.autoplay(now, beat, dt); this.effects(dt, beat);
       if (this.transition) {
         const progress = Math.max(0, Math.min(1, (now - this.transition.start) / this.transition.duration));
         this.mix = this.transition.from + (this.transition.to - this.transition.from) * progress;
@@ -677,5 +805,5 @@
     root.addEventListener('pointermove', pointer); root.addEventListener('pointerdown', pointer); pointer();
     return engine;
   }
-  root.VJEngine = { start, Engine, normalize, nextBoundary };
+  root.VJEngine = { start, Engine, normalize, nextBoundary, autoPlan, autoLook };
 })(window);

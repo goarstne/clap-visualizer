@@ -58,7 +58,9 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     return { n: pads.length, min: Math.round(Math.min(...pads.map(b => Math.min(b.width, b.height)))), bottom: Math.round(Math.max(...pads.map(b => b.bottom))), scroll: document.documentElement.scrollWidth > innerWidth || document.documentElement.scrollHeight > innerHeight, main: getComputedStyle(document.querySelector('main')).display }; });
   console.log('grid', JSON.stringify(grid));
   assert(grid.n === 96 && grid.min >= 90 && grid.bottom <= 1024 && !grid.scroll && grid.main === 'none', 'the grid fills the screen');
-  assert.strictEqual(await display.evaluate(() => vj.state.autoBars), 0, 'automatic switching is off');
+  // The software-rendered display may take a moment to apply the remote's state.
+  let autoBars; for (let i = 0; i < 30 && autoBars !== 0; i++) { autoBars = await display.evaluate(() => vj.state.autoBars); if (autoBars) await wait(100); }
+  assert.strictEqual(autoBars, 0, 'automatic switching is off');
   if (out) await page.screenshot({ path: out + '/perform.png' });
 
   // Hold = effect while pressed.

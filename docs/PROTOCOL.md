@@ -22,10 +22,10 @@ The Linux CLAP effect passes audio through unchanged and serves HTTP and WebSock
 A handshake with an `Origin` header is refused with 403 unless the origin's host equals the `Host` header, so only pages served by the plugin can connect from a browser. After the handshake, a new client receives the stored state first, if present. The CLAP state extension saves and restores the same opaque string in the host project. All clients receive transport messages at approximately 20 Hz:
 
 ```json
-{"type":"transport","bpm":120.0,"playing":true,"beat":17.25,"tsNum":4,"tsDen":4,"rms":0.21,"peak":0.63,"sampleRate":48000}
+{"type":"transport","bpm":120.0,"playing":true,"beat":17.25,"tsNum":4,"tsDen":4,"rms":0.21,"peak":0.63,"sampleRate":48000,"link":-1}
 ```
 
-`beat` is host song position in quarter notes. With no host transport, BPM and beat are zero and playing is false. RMS/peak are linear levels over the last send interval, using the stereo maximum.
+`beat` is host song position in quarter notes. With no host transport, BPM and beat are zero and playing is false. RMS/peak are linear levels over the last send interval, using the stereo maximum. `link` is -1 while Link is off, otherwise the number of other apps in the Ableton Link session. With Link on, at least one peer and the host stopped, `bpm`, `beat` (Link beat at quantum 4) and `playing` (true) come from Link, also in the binary frames; the time signature is then 4/4.
 
 Display clients also receive binary audio at approximately 60 Hz, little-endian:
 
