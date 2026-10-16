@@ -163,10 +163,10 @@ def main():
             assert transport['tsNum'] == transport['tsDen'] == 4
             assert 0 <= transport['rms'] <= 1 and 0 <= transport['peak'] <= 1
             audio = display.until(lambda op, p: op == 2)
-            assert len(audio) == 16 + 2 * 1024
+            assert len(audio) == 16 + 4 * 1024
             kind, flags, n, bpm, beat = struct.unpack('<BBHfd', audio[:16])
-            assert (kind, flags & 1, n, bpm) == (1, 1, 1024, 120)
-            assert beat >= 0 and len(set(audio[16:])) > 4
+            assert (kind, flags & 1, n, bpm) == (3, 1, 1024, 120)
+            assert beat >= 0 and len(set(struct.unpack('<2048h', audio[16:]))) > 4
             for _ in range(3):
                 op, payload = remote.recv()
                 assert op == 1, 'remote received audio'

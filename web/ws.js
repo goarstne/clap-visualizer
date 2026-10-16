@@ -159,19 +159,19 @@
         }
       } else if (data instanceof ArrayBuffer) {
         // Binary audio frame from server:
-        // Offset 0: u8 frameType (1)
+        // Offset 0: u8 frameType (3)
         // Offset 1: u8 flags (bit 0 = playing)
         // Offset 2: u16 N (little-endian)
         // Offset 4: f32 bpm (little-endian)
         // Offset 8: f64 beat (little-endian)
-        // Offset 16: u8[N] left channel
-        // Offset 16+N: u8[N] right channel
+        // Offset 16: i16[N] left channel
+        // Offset 16+2N: i16[N] right channel
         if (data.byteLength < 16) return;
 
         const view = new DataView(data);
         const frameType = view.getUint8(0);
         if (frameType === 2) { this.playPcm(view); return; }
-        if (frameType !== 1) return;
+        if (frameType !== 3) return;
 
         const flags = view.getUint8(1);
         const playing = (flags & 1) === 1;
@@ -179,11 +179,11 @@
         const bpm = view.getFloat32(4, true);
         const beat = view.getFloat64(8, true);
 
-        const expectedLength = 16 + 2 * N;
+        const expectedLength = 16 + 4 * N;
         if (data.byteLength < expectedLength) return;
 
-        const left = new Uint8Array(data, 16, N);
-        const right = new Uint8Array(data, 16 + N, N);
+        const left = new Float32Array(N), right = new Float32Array(N);
+        for (let i = 0; i < N; i++) { left[i] = view.getInt16(16 + 2 * i, true) / 32767; right[i] = view.getInt16(16 + 2 * (N + i), true) / 32767; }
 
         this.onAudio({
           flags,

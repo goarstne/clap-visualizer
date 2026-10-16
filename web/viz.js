@@ -38,14 +38,15 @@
 
   // Band edges in Hz. A band is the mean over its FFT bins, so the wide ones do not saturate,
   // and every band holds at least one bin at any sample rate.
-  const BANDS = { kick: [25, 150], bass: [65, 390], lead: [370, 1050], hats: [830, 16000] };
-  const BAND_GAIN = 2;
-  const bandState = {
-    kick: { env: 0, trig: 0, last: 0 },
-    bass: { env: 0, trig: 0, last: 0 },
-    lead: { env: 0, trig: 0, last: 0 },
-    hats: { env: 0, trig: 0, last: 0 }
-  };
+  const BANDS = { kick: [25, 120], bass: [65, 390], lead: [370, 1050], hats: [830, 16000] };
+  // Hits are spectral flux against its own recent mean, so they work at any volume and over a
+  // sustained 808; FLUX is that factor (kick and bass stricter, so a bassline does not count as
+  // kick), GAP the shortest time between two hits of a band. Energy is scaled by a slowly falling
+  // peak (auto gain); FLOOR keeps silence and noise at 0. Tuned with a synthetic beat and real tracks.
+  const FLUX = { kick: 2.5, bass: 2.5, lead: 2, hats: 1.6 }, FLOOR = 0.01, GAP = { kick: 0.09, bass: 0.09, lead: 0.09, hats: 0.09 };
+  const bandState = {};
+  for (const key in BANDS) bandState[key] = { env: 0, trig: 0, flux: 0, peak: FLOOR, since: 1 };
+  const prevMag = new Float32Array(BINS);
   const bandVecs = {
     kick: new Float32Array(4),
     bass: new Float32Array(4),
@@ -56,8 +57,10 @@
   const hits = { kick: false, hats: false };
   const ZERO4 = new Float32Array(4);
 
-  // Unsigned samples, 128 = silence; optional channel state keeps onset envelopes across frames.
+  // Unsigned bytes (128 = silence) or floats in -1..1, returned in the same form;
+  // optional channel state keeps onset envelopes across frames.
   function splitStems(wave, stems = {}, rate = 48000, state = {}) {
+    const scale = wave instanceof Uint8Array || Array.isArray(wave) ? 127 : 1, zero = scale === 1 ? 0 : 128;
     rate = Number.isFinite(rate) && rate > 0 ? rate : 48000;
     stems = stems || {};
     const hasHats = typeof stems.hats === 'boolean';
@@ -73,14 +76,14 @@
     const attack = 1 - Math.exp(-1 / (rate * 0.001)), follow = 1 - Math.exp(-1 / (rate * 0.08));
     const release = Math.exp(-1 / (rate * 0.1));
     let mean = 0;
-    for (let i = 0; i < wave.length; i++) mean += ((wave[i] - 128) / 127) ** 2;
+    for (let i = 0; i < wave.length; i++) mean += ((wave[i] - zero) / scale) ** 2;
     mean /= wave.length || 1;
     let lowFast = state.lowFast ?? mean, lowSlow = state.lowSlow ?? mean, lowGate = state.lowGate || 0;
     let midFast = state.midFast ?? mean, midSlow = state.midSlow ?? mean, midGate = state.midGate || 0;
     let x1 = 0, x2 = 0, l1 = 0, l2 = 0, h1 = 0, h2 = 0, top = 0;
     let drums = 0, bass = 0, melody = 0, hats = 0;
     for (let i = 0; i < wave.length; i++) {
-      const x = (wave[i] - 128) / 127;
+      const x = (wave[i] - zero) / scale;
       const low = b0 * (x + 2 * x1 + x2) - a1 * l1 - a2 * l2;
       const high = h0 * (x - 2 * x1 + x2) - a1 * h1 - a2 * h2;
       x2 = x1; x1 = x; l2 = l1; l1 = low; h2 = h1; h1 = high;
@@ -94,21 +97,22 @@
       // A selection without "hats" switches both with "drums", and its drums level covers both.
       const kick = low * lowGate, hat = top * midGate + high - top, b = low * (1 - lowGate), m = top * (1 - midGate);
       drums += hasHats ? kick * kick : (kick + hat) ** 2; bass += b * b; melody += m * m; hats += hat * hat;
-      if (!bypass) selected[i] = 128 + 127 * ((useDrums ? kick : 0) + (useBass ? b : 0) + (useMelody ? m : 0) + (useHats ? hat : 0));
+      if (!bypass) selected[i] = zero + scale * ((useDrums ? kick : 0) + (useBass ? b : 0) + (useMelody ? m : 0) + (useHats ? hat : 0));
     }
     Object.assign(state, { lowFast, lowSlow, lowGate, midFast, midSlow, midGate });
     const rms = sum => Math.min(1, Math.sqrt(sum / (wave.length || 1)));
     return { wave: selected, drums: rms(drums), bass: rms(bass), melody: rms(melody), hats: rms(hats) };
   }
 
-  // wave: 1024 unsigned bytes, 128 = silence. Returns the shared audio object.
+  // wave: 1024 unsigned bytes (128 = silence) or floats in -1..1. Returns the shared audio object.
   function analyze(wave, dt, rate) {
+    const scale = wave instanceof Uint8Array ? 127 : 1, offset = scale === 1 ? 128 : 0;
     rate = Number.isFinite(rate) && rate > 0 ? rate : 48000;
     dt = Number.isFinite(dt) && dt > 0 ? dt : 0.016;
     let mean = 0;
     for (let i = 0; i < N; i++) mean += wave[i];
     mean /= N;
-    for (let i = 0; i < N; i++) { re[rev[i]] = (wave[i] - mean) / 127 * hann[i]; im[i] = 0; }
+    for (let i = 0; i < N; i++) { re[rev[i]] = (wave[i] - mean) / scale * hann[i]; im[i] = 0; }
     for (let size = 2; size <= N; size <<= 1) {
       const half = size >> 1, stride = N / size;
       for (let start = 0; start < N; start += size) {
@@ -127,7 +131,7 @@
       const mag = (Math.hypot(re[k], im[k]) * (1 - f) + Math.hypot(re[k + 1], im[k + 1]) * f) / (N / 4);
       smooth[x] = Math.max(Math.min(1, Math.sqrt(mag) * (1 + 2 * x / BINS)), smooth[x] - fall);
       audio.tex[x] = smooth[x] * 255;
-      audio.tex[BINS + x] = wave[x * 2];
+      audio.tex[BINS + x] = Math.max(0, Math.min(255, offset + wave[x * 2] * (scale === 1 ? 127 : 1)));
       if (x < 128) bass += smooth[x]; else if (x < 358) mid += smooth[x]; else treb += smooth[x];
     }
     audio.bass = bass / 128; audio.mid = mid / 230; audio.treb = treb / 154;
@@ -137,19 +141,22 @@
     for (const key in BANDS) {
       const [lo, hi] = BANDS[key];
       const first = Math.max(1, Math.ceil(lo / perBin)), last = Math.max(first, Math.min(BINS - 1, Math.floor(hi / perBin)));
-      let sum = 0, weight = 0;
+      let sum = 0, weight = 0, flux = 0;
       for (let k = first; k <= last; k++) {
         const val = Math.sqrt(Math.hypot(re[k], im[k]) / (N / 4));
-        sum += val; weight += val * Math.log(k * perBin / lo);
+        sum += val; weight += val * Math.log(k * perBin / lo); flux += Math.max(0, val - prevMag[k]);
       }
-      const energy = Math.min(1, sum / (last - first + 1) * BAND_GAIN);
-      const st = bandState[key];
-      const jump = energy - st.last;
-      const isHit = (energy > st.env * 1.25 + 0.04) && (jump > 0.035);
+      const st = bandState[key], count = last - first + 1, raw = sum / count;
+      st.peak = Math.max(raw, FLOOR, st.peak * Math.exp(-dt / 8));
+      const energy = Math.min(1, raw / st.peak);
+      // A frame without new audio has no flux and must not pull the mean down.
+      flux /= count * st.peak; st.since += dt;
+      const isHit = flux > st.flux * FLUX[key] && flux > 0.04 && st.since > GAP[key];
+      if (flux > 0) st.flux += (flux - st.flux) * (1 - Math.exp(-dt / 0.6));
+      if (isHit) st.since = 0;
       const att = 1 - Math.exp(-dt / 0.012);
       const rel = 1 - Math.exp(-dt / 0.22);
       st.env += (energy > st.env ? att : rel) * (energy - st.env);
-      st.last = energy;
 
       if (isHit) {
         st.trig = 1.0;
@@ -164,6 +171,8 @@
       vec[2] = st.trig;
       vec[3] = Math.max(0, Math.min(1, pitch));
     }
+
+    for (let k = 0; k < BINS; k++) prevMag[k] = Math.sqrt(Math.hypot(re[k], im[k]) / (N / 4));
 
     function findPeakNote(minHz, maxHz, threshold) {
       const minK = Math.max(1, Math.floor(minHz / perBin));
@@ -225,6 +234,35 @@ vec2 view() {
   return p + uXf.y * 0.06 * vec2(sin(p.y * 7.0 + uTime), cos(p.x * 7.0 + uTime));
 }
 `;
+
+  // Shared raymarcher for the fractal types; each defines CAM, FAR, EPS (hit threshold per unit of
+  // distance: larger is smoother) and de(p, trap) before it.
+  const MARCH = `vec3 normalAt(vec3 p, float e) {
+  float t; vec2 k = vec2(1.0, -1.0);
+  return normalize(k.xyy * de(p + k.xyy * e, t) + k.yyx * de(p + k.yyx * e, t) + k.yxy * de(p + k.yxy * e, t) + k.xxx * de(p + k.xxx * e, t));
+}
+void main() {
+  vec2 p = view() * 2.0;
+  float t = uTime * 0.12;
+  vec3 ro = CAM * (1.0 - 0.12 * uKick.z - 0.06 * uKick.y) * normalize(vec3(sin(t), 0.45 * sin(t * 0.7), cos(t)));
+  vec3 fw = normalize(-ro), rt = normalize(cross(vec3(0.0, 1.0, 0.0), fw)), up = cross(fw, rt);
+  vec3 rd = normalize(fw * 1.8 + rt * p.x + up * p.y);
+  float d = 0.0, trap = 1.0, h = 1.0, steps = 0.0;
+  for (int i = 0; i < 96; i++) {
+    h = de(ro + rd * d, trap);
+    if (h < EPS * d || d > FAR) break;
+    d += h; steps += 1.0;
+  }
+  float glow = steps / 96.0;
+  vec3 tint = pal(trap * 0.6 + uLead.w * 0.5 + uTime * 0.02);
+  vec3 col = vec3(0.02, 0.01, 0.05) + pal(uLead.w + 0.3) * glow * glow * (0.4 + 0.8 * uBassBand.y);
+  if (d < FAR && h < 0.01) {
+    vec3 q = ro + rd * d, n = normalAt(q, max(0.0005, EPS * d));
+    float light = max(0.0, dot(n, normalize(vec3(0.6, 0.8, -0.4)))), rim = pow(1.0 - abs(dot(n, rd)), 3.0);
+    col = tint * (0.18 + 0.82 * light) * (1.0 - 0.7 * glow) + vec3(0.6, 0.85, 1.0) * rim * (0.2 + 1.5 * uHats.z);
+  }
+  outColor = vec4(col * (0.75 + 0.35 * uKick.y + 0.5 * uKick.z), 1.0);
+}`;
 
   const TYPES = {
     Spectrum: `void main() {
@@ -322,7 +360,36 @@ vec2 view() {
     col += pal(uLead.w + 0.5) * 0.005 / (abs(y - ridge) + 0.004) * (0.4 + uLevel + 0.5 * uKick.z);
   }
   outColor = vec4(col, 1.0);
-}`
+}`,
+    // Raymarched 3D fractals from the public formulas (own code, not Mandelbulber's).
+    // Bass morphs the shape, the kick pushes the camera in, hats light the edges, lead pitch picks colour.
+    Mandelbulb: `const float CAM = 2.6, FAR = 6.0, EPS = 0.0007;
+float de(vec3 p, out float trap) {
+  float power = 7.0 + 2.0 * uBassBand.y + sin(uTime * 0.13), dr = 1.0, r = length(p);
+  vec3 z = p; trap = 1e9;
+  for (int i = 0; i < 7 && r < 2.0; i++) {
+    float th = acos(clamp(z.z / r, -1.0, 1.0)) * power, ph = atan(z.y, z.x) * power;
+    dr = pow(r, power - 1.0) * power * dr + 1.0;
+    z = pow(r, power) * vec3(sin(th) * cos(ph), sin(th) * sin(ph), cos(th)) + p;
+    r = length(z); trap = min(trap, r);
+  }
+  return 0.5 * log(r) * r / dr;
+}
+` + MARCH,
+    Mandelbox: `const float CAM = 4.2, FAR = 9.0, EPS = 0.0025;
+float de(vec3 p, out float trap) {
+  float scale = -1.55 - 0.35 * uBassBand.y - 0.1 * sin(uTime * 0.11);
+  vec4 z = vec4(p, 1.0); trap = 1e9;
+  for (int i = 0; i < 8; i++) {
+    z.xyz = clamp(z.xyz, -1.0, 1.0) * 2.0 - z.xyz;
+    float r2 = dot(z.xyz, z.xyz);
+    z *= clamp(1.0 / r2, 1.0, 4.0);
+    z = z * scale + vec4(p, 1.0); trap = min(trap, r2);
+  }
+  trap = 0.3 * log(1.0 + 4.0 * trap);
+  return length(z.xyz) / abs(z.w);
+}
+` + MARCH
   };
 
   const names = Object.keys(TYPES).map(name => PREFIX + name);

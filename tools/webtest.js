@@ -11,7 +11,7 @@ const peak = levels.tex.subarray(0, 512).indexOf(Math.max(...levels.tex.subarray
 const expected = 511 * Math.log(3000 / 30) / Math.log(16000 / 30);
 assert(Math.abs(peak - expected) < 8, `peak at ${peak}, expected ${expected}`);
 assert(levels.mid + levels.treb > levels.bass * 5 && levels.tex[512] === wave[0]);
-assert(viz.names.length === 7 && viz.names.every(name => name.startsWith('◆ ')));
+assert(viz.names.length === 9 && viz.names.every(name => name.startsWith('◆ ')));
 
 // Clubber-style 4D vectors (energy, envelope, trigger, pitch) & musical note detection
 const resA2 = viz.analyze(Uint8Array.from({ length: 1024 }, (_, i) => Math.round(128 + 100 * Math.sin(2 * Math.PI * 110 * i / 48000))), 0.016, 48000);
@@ -22,23 +22,24 @@ for (const k of ['kick', 'bass', 'lead', 'hats']) {
 }
 const resA4 = viz.analyze(Uint8Array.from({ length: 1024 }, (_, i) => Math.round(128 + 100 * Math.sin(2 * Math.PI * 440 * i / 48000))), 0.016, 48000);
 assert.strictEqual(resA4.notes.lead, 'A4');
-// Two seconds at 120 BPM over a noise floor: kicks on the beat, hats in between. Each band fires only
-// for its own instrument, and the wide hats band stays clear of full scale.
-{
+// Three seconds at 120 BPM over a noise floor: kicks on the beat, hats in between. Each band fires only
+// for its own instrument, and the hats energy reaches its auto-gain range. At -24 dB (on a fresh
+// module, as after loading the page) the hits stay the same: hit detection does not depend on volume.
+for (const [gain, analyze] of [[1, viz.analyze], [0.063, (delete require.cache[require.resolve(path.join(web, 'viz.js'))], require(path.join(web, 'viz.js'))).analyze]]) {
   let seed = 1; const noise = () => ((seed = seed * 1664525 + 1013904223 >>> 0) / 2 ** 32) * 2 - 1;
-  const song = Float32Array.from({ length: 96000 }, (_, i) => {
+  const song = Float32Array.from({ length: 144000 }, (_, i) => {
     const t = i / 48000, beat = t % 0.5, off = (t + 0.25) % 0.5;
     return 0.6 * Math.sin(2 * Math.PI * 55 * beat) * Math.exp(-beat * 18) + 0.25 * noise() * Math.exp(-off * 60) + 0.05 * noise();
   });
   const onsets = { kick: [], hats: [] }, was = {}; let top = 0;
-  for (let frame = 20; frame < 120; frame++) {
-    const end = frame * 800, res = viz.analyze(Uint8Array.from({ length: 1024 }, (_, i) => Math.round(128 + 127 * song[end - 1024 + i])), 1 / 60, 48000);
-    // The first frames only settle the envelopes after the tones above.
-    for (const key of ['kick', 'hats']) { if (frame > 24 && res.hits[key] && !was[key]) onsets[key].push(Math.round(frame / 15) / 4); was[key] = res.hits[key]; }
+  for (let frame = 2; frame < 180; frame++) {
+    const end = frame * 800, res = analyze(Float32Array.from({ length: 1024 }, (_, i) => gain * song[end - 1024 + i]), 1 / 60, 48000);
+    // The first 0.6 s only settle the flux means (a page warms up the same way).
+    for (const key of ['kick', 'hats']) { if (frame > 36 && res.hits[key] && !was[key]) onsets[key].push(Math.round(frame / 15) / 4); was[key] = res.hits[key]; }
     top = Math.max(top, res.bands.hats[0]);
   }
-  assert.deepStrictEqual(onsets, { kick: [0.5, 1, 1.5], hats: [0.75, 1.25, 1.75] });
-  assert(top > 0.15 && top < 0.9, `hats energy ${top}`);
+  assert.deepStrictEqual(onsets, { kick: [1, 1.5, 2, 2.5], hats: [0.75, 1.25, 1.75, 2.25, 2.75] }, `gain ${gain}`);
+  assert(top > 0.15 && top <= 1, `hats energy ${top}`);
 }
 // At 96 kHz the kick band still holds a bin.
 assert(viz.analyze(Uint8Array.from({ length: 1024 }, (_, i) => Math.round(128 + 100 * Math.sin(2 * Math.PI * 90 * i / 96000))), 0.016, 96000).bands.kick[0] > 0.3);
@@ -113,15 +114,15 @@ global.window.ShaderViz = viz;
 const engine = Object.create(Engine.prototype), sent = [];
 Object.assign(engine, {
   state: normalize({ v: 2, stems: all }), frameFX: { gain: 1.4, bass: 0.7, mid: 1.8, treb: 0.5 },
-  transport: { sampleRate: 48000 }, rawL: wave, rawR: Uint8Array.from(sine(60)),
+  transport: { sampleRate: 48000 }, rawL: Float32Array.from(wave, byte => (byte - 128) / 127), rawR: Float32Array.from(sine(60), byte => (byte - 128) / 127), mono: new Float32Array(1024),
   levels: { timeByteArray: new Uint8Array(1024), timeByteArrayL: new Uint8Array(1024), timeByteArrayR: new Uint8Array(1024) },
   kickAt: -Infinity, lastAudio: 0, audioFrameAt: 0, lastBands: -Infinity,
   stemState: [{}, {}], bands: { drums: 0, bass: 0, melody: 0 }, socket: { send: message => sent.push(message) }
 });
 const legacy = raw => {
   let bass = 0, mid = 0;
-  return Uint8Array.from(raw, byte => {
-    const sample = (byte - 128) / 127, fx = engine.frameFX;
+  return Uint8Array.from(raw, sample => {
+    const fx = engine.frameFX;
     bass += (1 - Math.exp(-2 * Math.PI * 200 / 48000)) * (sample - bass);
     mid += (1 - Math.exp(-2 * Math.PI * 2500 / 48000)) * (sample - mid);
     return Math.round(Math.max(0, Math.min(255, 128 + 127 * fx.gain * (bass * fx.bass + (mid - bass) * fx.mid + (sample - mid) * fx.treb))));

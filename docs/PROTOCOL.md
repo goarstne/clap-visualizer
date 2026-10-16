@@ -31,13 +31,13 @@ Display clients also receive binary audio at approximately 60 Hz, little-endian:
 
 | Offset | Type | Meaning |
 |---|---|---|
-| 0 | u8 | Frame type 1 |
+| 0 | u8 | Frame type 3 (type 1 had 8-bit samples and is no longer sent) |
 | 1 | u8 | Flags; bit 0 means playing |
 | 2 | u16 | Samples per channel N = 1024 |
 | 4 | f32 | BPM |
 | 8 | f64 | Beat position |
-| 16 | u8[N] | Latest left samples: clipped `128 + sample * 127` |
-| 16 + N | u8[N] | Latest right samples, same encoding |
+| 16 | i16[N] | Latest left samples: clipped `sample * 32767` |
+| 16 + 2N | i16[N] | Latest right samples, same encoding |
 
 Listening clients receive the complete signal for playback, about 40 ms per frame. A client more than half a second behind skips frames.
 

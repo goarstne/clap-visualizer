@@ -141,7 +141,7 @@
       this.mix = this.targetMix = this.state.xfade;
       this.transport = { bpm: 0, beat: 0, playing: false, tsNum: 4, tsDen: 4, sampleRate: 48000 };
       this.transportAt = performance.now(); this.lastAudio = -Infinity;
-      this.rawL = new Uint8Array(1024).fill(128); this.rawR = new Uint8Array(1024).fill(128);
+      this.rawL = new Float32Array(1024); this.rawR = new Float32Array(1024); this.mono = new Float32Array(1024);
       this.levels = {
         timeByteArray: new Uint8Array(1024), timeByteArrayL: new Uint8Array(1024),
         timeByteArrayR: new Uint8Array(1024)
@@ -432,7 +432,7 @@
 
     audio(data) {
       this.lastAudio = performance.now(); this.setTransport(data);
-      this.rawL.fill(128); this.rawR.fill(128);
+      this.rawL.fill(0); this.rawR.fill(0);
       this.rawL.set(data.left.subarray(0, 1024)); this.rawR.set(data.right.subarray(0, 1024));
     }
 
@@ -665,17 +665,19 @@
       const dt = Math.max(0, (now - this.audioFrameAt) / 1000); this.audioFrameAt = now;
       const bands = { drums: 0, bass: 0, melody: 0 };
       if (this.bands.hats !== undefined || (this.state.stems && typeof this.state.stems.hats === 'boolean')) bands.hats = 0;
+      this.mono.fill(0);
       for (const [raw, processed, state] of [[this.rawL, this.levels.timeByteArrayL, this.stemState[0]], [this.rawR, this.levels.timeByteArrayR, this.stemState[1]]]) {
         const split = fresh && root.ShaderViz ? root.ShaderViz.splitStems(raw, this.state.stems, rate, state) : null;
         for (const key of Object.keys(bands)) bands[key] = Math.max(bands[key], split ? (split[key] || 0) : 0);
         const selected = split ? split.wave : raw;
         let bass = 0, lowMid = 0;
         for (let i = 0; i < 1024; i++) {
-          const sample = fresh ? (selected[i] - 128) / 127 : 0;
+          const sample = fresh ? selected[i] : 0;
           bass += bassAlpha * (sample - bass); lowMid += midAlpha * (sample - lowMid);
           const impulse = kick ? kick * Math.sin(2 * Math.PI * 65 * (kickTime + i / rate)) : 0;
           const value = fx.gain * (bass * fx.bass + (lowMid - bass) * fx.mid + (sample - lowMid) * fx.treb + impulse * fx.bass);
           processed[i] = Math.round(Math.max(0, Math.min(255, 128 + value * 127)));
+          this.mono[i] += Math.max(-1, Math.min(1, value)) / 2;
         }
       }
       for (let i = 0; i < 1024; i++) this.levels.timeByteArray[i] = (this.levels.timeByteArrayL[i] + this.levels.timeByteArrayR[i]) >> 1;
@@ -728,7 +730,8 @@
       }
       const options = { audioLevels: this.processAudio(now), elapsedTime: Math.max(0.000001, dt * (this.held.freeze ? 0 : this.frameFX.speed)) };
       if (root.ShaderViz) {
-        this.spectrum = root.ShaderViz.analyze(this.levels.timeByteArray, dt, this.transport.sampleRate);
+        // The analysis gets the full resolution; butterchurn keeps its bytes.
+        this.spectrum = root.ShaderViz.analyze(this.mono, dt, this.transport.sampleRate);
         if (this.spectrum.hits.kick) this.hit.kick = 1;
         if (this.spectrum.hits.hats) this.hit.hats = 1;
       }

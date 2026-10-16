@@ -612,14 +612,15 @@ struct Plugin {
                 auto now=Clock::now();
                 if (now>=nextAudio) {
                     nextAudio=now+std::chrono::microseconds(16667);
-                    std::string payload(16+2*Samples,'\0'); payload[0]=1; payload[1]=play;
+                    // 16-bit samples: at 8 bits a quiet mix drowns in rounding noise that reads as hats.
+                    std::string payload(16+4*Samples,'\0'); payload[0]=3; payload[1]=play;
                     payload[2]=Samples&255; payload[3]=Samples>>8;
                     float f=tempo; uint32_t fb; uint64_t db; std::memcpy(&fb,&f,4); std::memcpy(&db,&position,8);
                     for (int i=0;i<4;++i) payload[4+i]=char(fb>>(8*i));
                     for (int i=0;i<8;++i) payload[8+i]=char(db>>(8*i));
                     for (size_t i=0;i<Samples;++i) { Stereo s=recent[(cursor+i)%Samples];
-                        auto quant=[](float x)->char { if (!std::isfinite(x)) x=0; return char(uint8_t(128+std::clamp(x,-1.f,1.f)*127)); };
-                        payload[16+i]=quant(s.l); payload[16+Samples+i]=quant(s.r);
+                        auto put=[&](size_t at,float x) { if (!std::isfinite(x)) x=0; int16_t n=int16_t(std::lround(std::clamp(x,-1.f,1.f)*32767)); payload[at]=char(n); payload[at+1]=char(n>>8); };
+                        put(16+2*i,s.l); put(16+2*(Samples+i),s.r);
                     }
                     std::string bytes=frame(2,payload);
                     for (Client &c:clients) if (c.ws && c.display) queue(c,bytes,true);
